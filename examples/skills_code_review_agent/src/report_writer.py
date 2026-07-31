@@ -134,11 +134,12 @@ def render_markdown_report(report: ReviewReport) -> str:
 
 
 def write_report_files(
-    report: ReviewReport,
+    report_payload: dict[str, object],
+    report_markdown: str,
     *,
     output_dir: str | Path,
 ) -> tuple[Path, Path]:
-    """Write both JSON and Markdown reports to the output directory."""
+    """Write pre-rendered JSON and Markdown reports to the output directory."""
 
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -147,10 +148,10 @@ def write_report_files(
     markdown_path = output_path / "review_report.md"
 
     json_path.write_text(
-        json.dumps(build_report_payload(report), indent=2, ensure_ascii=False),
+        json.dumps(report_payload, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    markdown_path.write_text(render_markdown_report(report), encoding="utf-8")
+    markdown_path.write_text(report_markdown, encoding="utf-8")
     return json_path, markdown_path
 
 

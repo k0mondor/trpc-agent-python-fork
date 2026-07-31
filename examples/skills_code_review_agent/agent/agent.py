@@ -31,6 +31,7 @@ from ..src.review_types import (
     ReviewSeverity,
     ReviewStatus,
     ReviewTask,
+    SandboxRunStatus,
 )
 from ..src.storage.repository import ReviewRepository
 from ..src.telemetry import build_monitoring_summary
@@ -156,7 +157,11 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
     report = redact_report(report)
     report_json = build_report_payload(report)
     report_markdown = render_markdown_report(report)
-    write_report_files(report, output_dir=config.output_dir)
+    write_report_files(
+        report_json,
+        report_markdown,
+        output_dir=config.output_dir,
+    )
 
     repository = ReviewRepository(config.db_path)
     repository.save_review(
@@ -233,7 +238,7 @@ def _sandbox_run_findings(task: ReviewTask, sandbox_run) -> list[ReviewFinding]:
 def _sandbox_output_findings(task: ReviewTask, sandbox_run) -> list[ReviewFinding]:
     """Promote successful skill-script diagnostics into structured findings."""
 
-    if sandbox_run.status != sandbox_run.status.SUCCEEDED or not sandbox_run.stdout:
+    if sandbox_run.status != SandboxRunStatus.SUCCEEDED or not sandbox_run.stdout:
         return []
 
     try:

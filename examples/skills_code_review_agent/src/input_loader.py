@@ -8,6 +8,8 @@ from typing import Sequence
 
 from .review_types import ReviewInput, ReviewInputKind
 
+GIT_DIFF_TIMEOUT_SECONDS = 30
+
 
 def load_review_input(
     *,
@@ -71,19 +73,12 @@ def load_git_workspace_diff(
         str(repo_dir),
         "diff",
         "--no-ext-diff",
-        "--binary",
         "HEAD",
         "--",
         *pathspec,
     ]
 
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        check=False,
-        text=True,
-        encoding="utf-8",
-    )
+    completed = _run_git_diff(command, operation="git diff HEAD")
     if completed.returncode == 0:
         return completed.stdout
 
@@ -93,21 +88,17 @@ def load_git_workspace_diff(
             f"{completed.stderr.strip() or completed.stdout.strip() or 'unknown error'}"
         )
 
-    fallback = subprocess.run(
+    fallback = _run_git_diff(
         [
             "git",
             "-C",
             str(repo_dir),
             "diff",
             "--no-ext-diff",
-            "--binary",
             "--",
             *pathspec,
         ],
-        capture_output=True,
-        check=False,
-        text=True,
-        encoding="utf-8",
+        operation="fallback git diff",
     )
     if fallback.returncode != 0:
         raise RuntimeError(
@@ -115,6 +106,28 @@ def load_git_workspace_diff(
             f"{fallback.stderr.strip() or fallback.stdout.strip() or 'unknown error'}"
         )
     return fallback.stdout
+
+
+def _run_git_diff(
+    command: list[str],
+    *,
+    operation: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run a git diff command with a bounded execution time."""
+
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            timeout=GIT_DIFF_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"{operation} timed out after {GIT_DIFF_TIMEOUT_SECONDS} seconds"
+        ) from exc
 
 
 def _ensure_existing_path(path: str | Path | None) -> Path:

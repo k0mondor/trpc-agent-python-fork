@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,14 @@ import pytest
 from examples.skills_code_review_agent.agent.agent import run_review_task
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
 from examples.skills_code_review_agent.run_agent import parse_args
+from examples.skills_code_review_agent.src import input_loader as input_loader_module
 from examples.skills_code_review_agent.src.deduper import dedupe_and_classify_findings
 from examples.skills_code_review_agent.src.diff_parser import parse_unified_diff
-from examples.skills_code_review_agent.src.input_loader import load_review_input
+from examples.skills_code_review_agent.src.input_loader import (
+    GIT_DIFF_TIMEOUT_SECONDS,
+    load_git_workspace_diff,
+    load_review_input,
+)
 from examples.skills_code_review_agent.src.rule_engine import run_rule_engine
 from examples.skills_code_review_agent.src.review_types import (
     DiffLineType,
@@ -107,6 +113,87 @@ def test_load_review_input_requires_exactly_one_source(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         load_review_input(diff_file=diff_path, fixture_path=diff_path)
+
+
+def test_load_git_workspace_diff_times_out(monkeypatch, tmp_path: Path) -> None:
+    """A stalled git command should fail with a bounded, actionable error."""
+
+    def raise_timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(input_loader_module.subprocess, "run", raise_timeout)
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"git diff HEAD timed out after {GIT_DIFF_TIMEOUT_SECONDS} seconds",
+    ):
+        load_git_workspace_diff(tmp_path)
+
+
+def test_load_git_workspace_diff_fallback_times_out(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The no-HEAD fallback must use the same timeout boundary."""
+
+    call_count = 0
+
+    def fail_fallback(command, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return subprocess.CompletedProcess(
+                command,
+                128,
+                stdout="",
+                stderr="fatal: bad revision 'HEAD'",
+            )
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(input_loader_module.subprocess, "run", fail_fallback)
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"fallback git diff timed out after {GIT_DIFF_TIMEOUT_SECONDS} seconds",
+    ):
+        load_git_workspace_diff(tmp_path)
+
+
+def test_load_git_workspace_diff_uses_text_only_patch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Binary changes should remain summaries rather than encoded patch hunks."""
+
+    observed_commands: list[list[str]] = []
+
+    def return_binary_summary(command, **kwargs):
+        observed_commands.append(command)
+        assert kwargs["timeout"] == GIT_DIFF_TIMEOUT_SECONDS
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "diff --git a/image.bin b/image.bin\n"
+                "index e69de29..d00491f 100644\n"
+                "Binary files a/image.bin and b/image.bin differ\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        input_loader_module.subprocess,
+        "run",
+        return_binary_summary,
+    )
+
+    parsed = parse_unified_diff(load_git_workspace_diff(tmp_path))
+
+    assert observed_commands
+    assert all("--binary" not in command for command in observed_commands)
+    assert parsed.changed_files_count == 1
+    assert parsed.added_lines_count == 0
+    assert parsed.deleted_lines_count == 0
 
 
 def test_parse_args_reads_diff_file_mode() -> None:

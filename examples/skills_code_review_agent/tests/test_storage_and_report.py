@@ -52,6 +52,8 @@ def test_run_review_task_writes_report_files_and_database(tmp_path: Path) -> Non
     assert bundle["input"]["changed_files_count"] == 2
     assert len(bundle["findings"]) >= 2
     assert bundle["report"]["final_verdict"] == report.conclusion.value
+    assert json.loads(bundle["report"]["report_json"]) == payload
+    assert bundle["report"]["report_markdown"] == markdown
 
 
 def test_run_review_task_persists_human_review_state(tmp_path: Path) -> None:
