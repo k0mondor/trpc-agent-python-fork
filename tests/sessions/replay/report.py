@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,25 @@ from .comparator import expected_diff_paths_for_backend_pair
 
 
 REPORT_SCHEMA_VERSION = 5
+COMPARISON_KEYS = ("normal_comparisons", "injected_comparisons", "comparisons")
+SUMMARY_FAULT_CASE_IDS = {
+    "summary_binding_mismatch_injection",
+    "summary_missing_injection",
+    "summary_lineage_corruption_injection",
+}
+REQUIRED_META_FIELDS = {
+    "mode",
+    "elapsed_seconds",
+    "backend_names",
+    "baseline_backend",
+    "comparison_mode",
+    "acceptance_case_count",
+    "extra_case_count",
+    "quality_metrics",
+    "supported_modes",
+    "backend_statuses",
+    "required_scenario_coverage",
+}
 
 
 IMPLEMENTATION_PROFILE = {
@@ -37,23 +57,6 @@ def _status_for_comparisons(comparisons: list[dict[str, Any]]) -> str:
     if not comparisons:
         return "not_evaluated"
     return "passed" if all(_comparison_passed(item) for item in comparisons) else "failed"
-
-
-def build_case_report(case: ReplayCase, diffs: list[DiffEntry]) -> dict[str, Any]:
-    expected_paths = set(case.expected_diff_paths)
-    allowed_paths = {rule.path for rule in rules_for_case(case)}
-    detected_paths = {diff.path for diff in diffs if not diff.allowed}
-    return {
-        "case_id": case.case_id,
-        "description": case.description,
-        "expects_diffs": bool(expected_paths),
-        "expected_diff_paths": sorted(expected_paths),
-        "allowed_diff_paths": sorted(allowed_paths),
-        "detected_diff_paths": sorted(detected_paths),
-        "missing_expected_paths": sorted(expected_paths - detected_paths),
-        "unexpected_diff_paths": sorted(detected_paths - expected_paths),
-        "diffs": [diff.to_dict() for diff in diffs],
-    }
 
 
 def build_comparison_report(
@@ -86,26 +89,13 @@ def build_comparison_report(
 
 
 def build_case_matrix_report(case: ReplayCase, comparisons: list[dict[str, Any]]) -> dict[str, Any]:
-    expected_paths = set(case.expected_diff_paths)
-    detected_paths = {
-        path
-        for comparison in comparisons
-        for path in comparison.get("detected_diff_paths", [])
-    }
     return {
         "case_id": case.case_id,
         "description": case.description,
         "scenario_type": "extended",
         "status": _status_for_comparisons(comparisons),
-        "expects_diffs": bool(expected_paths),
-        "expected_diff_paths": sorted(expected_paths),
-        "allowed_diff_paths": sorted(rule.path for rule in rules_for_case(case)),
-        "detected_diff_paths": sorted(detected_paths),
-        "missing_expected_paths": sorted(expected_paths - detected_paths),
-        "unexpected_diff_paths": sorted(detected_paths - expected_paths),
         "comparison_count": len(comparisons),
         "comparisons": comparisons,
-        "diffs": [diff for comparison in comparisons for diff in comparison.get("diffs", [])],
     }
 
 
@@ -140,13 +130,8 @@ def build_acceptance_case_report(
 def build_acceptance_quality_metrics(case_reports: list[dict[str, Any]]) -> dict[str, Any]:
     normal_failed_case_ids: list[str] = []
     injection_missed_case_ids: list[str] = []
-    summary_fault_case_ids = {
-        "summary_binding_mismatch_injection",
-        "summary_missing_injection",
-        "summary_lineage_corruption_injection",
-    }
     reported_case_ids = {str(report["case_id"]) for report in case_reports}
-    summary_fault_missed_case_ids = sorted(summary_fault_case_ids - reported_case_ids)
+    summary_fault_missed_case_ids = sorted(SUMMARY_FAULT_CASE_IDS - reported_case_ids)
 
     for report in case_reports:
         case_id = str(report["case_id"])
@@ -162,14 +147,14 @@ def build_acceptance_quality_metrics(case_reports: list[dict[str, Any]]) -> dict
         )
         if not injection_detected:
             injection_missed_case_ids.append(case_id)
-            if case_id in summary_fault_case_ids and case_id not in summary_fault_missed_case_ids:
+            if case_id in SUMMARY_FAULT_CASE_IDS and case_id not in summary_fault_missed_case_ids:
                 summary_fault_missed_case_ids.append(case_id)
 
     case_count = len(case_reports)
     detected_count = case_count - len(injection_missed_case_ids)
     normal_passed_count = case_count - len(normal_failed_case_ids)
     summary_fault_missed_case_ids.sort()
-    summary_fault_count = len(summary_fault_case_ids)
+    summary_fault_count = len(SUMMARY_FAULT_CASE_IDS)
     summary_fault_detected_count = summary_fault_count - len(summary_fault_missed_case_ids)
     return {
         "public_case_count": case_count,
@@ -189,37 +174,43 @@ def build_acceptance_quality_metrics(case_reports: list[dict[str, Any]]) -> dict
     }
 
 
+def _iter_comparisons(
+    case_reports: list[dict[str, Any]],
+) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    for report in case_reports:
+        for key in COMPARISON_KEYS:
+            for comparison in report.get(key, []):
+                yield report, comparison
+
+
 def _report_locator_metrics(case_reports: list[dict[str, Any]]) -> dict[str, Any]:
     checked_count = 0
     complete_count = 0
     incomplete: list[dict[str, str]] = []
-    for report in case_reports:
-        comparison_groups = (
-            report.get("normal_comparisons", []),
-            report.get("injected_comparisons", []),
-            report.get("comparisons", []),
-        )
-        for comparisons in comparison_groups:
-            for comparison in comparisons:
-                for diff in comparison.get("diffs", []):
-                    if diff.get("allowed"):
-                        continue
-                    checked_count += 1
-                    path = str(diff.get("path", ""))
-                    has_base_locator = bool(diff.get("session_id") and path)
-                    has_values = "left" in diff and "right" in diff and diff["left"] != diff["right"]
-                    has_specific_locator = True
-                    if ".events[" in path:
-                        has_specific_locator = diff.get("event_index") is not None
-                    elif path.startswith("summary") or ".summary" in path:
-                        has_specific_locator = bool(diff.get("summary_id"))
-                    if has_base_locator and has_values and has_specific_locator:
-                        complete_count += 1
-                    else:
-                        incomplete.append({
-                            "case_id": str(report.get("case_id", "")),
-                            "path": path,
-                        })
+    for report, comparison in _iter_comparisons(case_reports):
+        for diff in comparison.get("diffs", []):
+            if diff.get("allowed"):
+                continue
+            checked_count += 1
+            path = str(diff.get("path", ""))
+            complete = bool(
+                diff.get("session_id")
+                and path
+                and "left" in diff
+                and "right" in diff
+                and diff["left"] != diff["right"]
+            )
+            if ".events[" in path:
+                complete = complete and diff.get("event_index") is not None
+            elif path.startswith("summary") or ".summary" in path:
+                complete = complete and bool(diff.get("summary_id"))
+            if complete:
+                complete_count += 1
+            else:
+                incomplete.append({
+                    "case_id": str(report.get("case_id", "")),
+                    "path": path,
+                })
     return {
         "checked_diff_count": checked_count,
         "complete_diff_count": complete_count,
@@ -252,72 +243,79 @@ def build_acceptance_criteria(
         performance_status = "not_evaluated"
         performance_actual = "Only lightweight mode has a 30-second requirement."
 
+    def criterion(
+        criterion_id: str,
+        requirement: str,
+        status: str,
+        actual: Any,
+        threshold: str,
+    ) -> dict[str, Any]:
+        return {
+            "criterion_id": criterion_id,
+            "requirement": requirement,
+            "status": status,
+            "actual": actual,
+            "threshold": threshold,
+        }
+
+    def verdict(passed: bool) -> str:
+        return "passed" if passed else "failed"
     return [
-        {
-            "criterion_id": "AC1",
-            "requirement": "Compare InMemory with at least one persistent or simulated persistent backend.",
-            "status": "passed" if backend_passed else "failed",
-            "actual": {
+        criterion(
+            "AC1",
+            "Compare InMemory with at least one persistent or simulated persistent backend.",
+            verdict(backend_passed),
+            {
                 "enabled_backends": [item.get("name") for item in enabled_backends],
                 "persistent_backends": [item.get("name") for item in persistent_backends],
             },
-            "threshold": "at least 2 enabled backends, including 1 persistent backend",
-        },
-        {
-            "criterion_id": "AC2",
-            "requirement": "Detect every injected inconsistency in the 10 public replay cases.",
-            "status": (
-                "passed"
-                if metrics.get("public_case_count") == 10
+            "at least 2 enabled backends, including 1 persistent backend",
+        ),
+        criterion(
+            "AC2",
+            "Detect every injected inconsistency in the 10 public replay cases.",
+            verdict(
+                metrics.get("public_case_count") == 10
                 and metrics.get("injection_detection_rate") == 1.0
-                else "failed"
             ),
-            "actual": {
+            {
                 "case_count": metrics.get("public_case_count", 0),
                 "detection_rate": metrics.get("injection_detection_rate", 0.0),
                 "missed_case_ids": metrics.get("injection_missed_case_ids", []),
             },
-            "threshold": "10 cases and 100% detection",
-        },
-        {
-            "criterion_id": "AC3",
-            "requirement": "Keep the false-positive rate for normal cases at or below 5%.",
-            "status": (
-                "passed"
-                if metrics.get("normal_false_positive_rate", 1.0) <= 0.05
-                else "failed"
-            ),
-            "actual": metrics.get("normal_false_positive_rate", 1.0),
-            "threshold": "<= 0.05",
-        },
-        {
-            "criterion_id": "AC4",
-            "requirement": "Detect summary loss, overwrite-lineage errors and session ownership errors.",
-            "status": (
-                "passed"
-                if metrics.get("summary_fault_detection_rate") == 1.0
-                else "failed"
-            ),
-            "actual": {
+            "10 cases and 100% detection",
+        ),
+        criterion(
+            "AC3",
+            "Keep the false-positive rate for normal cases at or below 5%.",
+            verdict(metrics.get("normal_false_positive_rate", 1.0) <= 0.05),
+            metrics.get("normal_false_positive_rate", 1.0),
+            "<= 0.05",
+        ),
+        criterion(
+            "AC4",
+            "Detect summary loss, overwrite-lineage errors and session ownership errors.",
+            verdict(metrics.get("summary_fault_detection_rate") == 1.0),
+            {
                 "detection_rate": metrics.get("summary_fault_detection_rate", 0.0),
                 "missed_case_ids": metrics.get("summary_fault_missed_case_ids", []),
             },
-            "threshold": "100% across all 3 summary fault classes",
-        },
-        {
-            "criterion_id": "AC5",
-            "requirement": "Locate every diff by session, field path, values, and event or summary identity.",
-            "status": "passed" if locator_passed else "failed",
-            "actual": locator_metrics,
-            "threshold": "100% locator completeness",
-        },
-        {
-            "criterion_id": "AC6",
-            "requirement": "Complete lightweight mode within 30 seconds; integrations may be skipped.",
-            "status": performance_status,
-            "actual": performance_actual,
-            "threshold": "<= 30 seconds in lightweight mode",
-        },
+            "100% across all 3 summary fault classes",
+        ),
+        criterion(
+            "AC5",
+            "Locate every diff by session, field path, values, and event or summary identity.",
+            verdict(locator_passed),
+            locator_metrics,
+            "100% locator completeness",
+        ),
+        criterion(
+            "AC6",
+            "Complete lightweight mode within 30 seconds; integrations may be skipped.",
+            performance_status,
+            performance_actual,
+            "<= 30 seconds in lightweight mode",
+        ),
     ]
 
 
@@ -328,9 +326,7 @@ def build_report_summary(
     statuses = [str(report.get("status", "not_evaluated")) for report in case_reports]
     diff_records = [
         (diff, comparison)
-        for report in case_reports
-        for comparison_key in ("normal_comparisons", "injected_comparisons", "comparisons")
-        for comparison in report.get(comparison_key, [])
+        for _, comparison in _iter_comparisons(case_reports)
         for diff in comparison.get("diffs", [])
     ]
     failed_criteria = [
@@ -365,30 +361,17 @@ def validate_report_payload(payload: dict[str, Any]) -> None:
 
     if payload.get("schema_version") != REPORT_SCHEMA_VERSION:
         raise ValueError(f"Unsupported replay report schema version: {payload.get('schema_version')}")
-    if not isinstance(payload.get("meta"), dict):
-        raise ValueError("Replay report 'meta' must be an object")
-    if not isinstance(payload.get("summary"), dict):
-        raise ValueError("Replay report 'summary' must be an object")
-    if not isinstance(payload.get("acceptance_criteria"), list):
-        raise ValueError("Replay report 'acceptance_criteria' must be an array")
-    if not isinstance(payload.get("implementation_profile"), dict):
-        raise ValueError("Replay report 'implementation_profile' must be an object")
-    if not isinstance(payload.get("cases"), list):
-        raise ValueError("Replay report 'cases' must be an array")
-    required_meta = {
-        "mode",
-        "elapsed_seconds",
-        "backend_names",
-        "baseline_backend",
-        "comparison_mode",
-        "acceptance_case_count",
-        "extra_case_count",
-        "quality_metrics",
-        "supported_modes",
-        "backend_statuses",
-        "required_scenario_coverage",
+    typed_fields = {
+        "meta": dict,
+        "summary": dict,
+        "acceptance_criteria": list,
+        "implementation_profile": dict,
+        "cases": list,
     }
-    missing_meta = sorted(required_meta - set(payload["meta"]))
+    for field, expected_type in typed_fields.items():
+        if not isinstance(payload.get(field), expected_type):
+            raise ValueError(f"Replay report '{field}' must be a {expected_type.__name__}")
+    missing_meta = sorted(REQUIRED_META_FIELDS - set(payload["meta"]))
     if missing_meta:
         raise ValueError(f"Replay report meta is missing required fields: {missing_meta}")
     for index, case_report in enumerate(payload["cases"]):

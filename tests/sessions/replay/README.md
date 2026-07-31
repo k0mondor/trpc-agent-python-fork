@@ -36,3 +36,7 @@ acceptance criteria.
 
 Production SDK fixes are intentionally outside this package. They should be
 reviewed and committed independently from replay-framework changes.
+
+The compact design and acceptance table live in
+`../replay_acceptance_design.md`; the 20 report cases are documented separately
+in `../replay_cases.md`.

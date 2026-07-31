@@ -47,6 +47,7 @@ ADAPTER_TYPES: tuple[Type[ReplayBackendAdapter], ...] = (
 )
 REDIS_REPLAY_URL_ENV = "TRPC_AGENT_REPLAY_REDIS_URL"
 AdapterFactory = Callable[[], ReplayBackendAdapter]
+RawInjector = Callable[[ReplayBackendAdapter, RawStorageTarget], bool]
 
 SUPPORTED_REPLAY_MODES = (
     "inmemory_only",
@@ -141,6 +142,41 @@ async def _run_case_on_backend(
         await adapter.close()
 
 
+async def _run_backends(
+    adapter_factories: tuple[AdapterFactory, ...],
+    case: ReplayCase,
+) -> tuple[
+    list[BackendSnapshot],
+    dict[str, dict[str, object]],
+    dict[str, dict[str, object]],
+]:
+    runs = [await _run_case_on_backend(factory, case) for factory in adapter_factories]
+    return (
+        [snapshot for snapshot, _, _ in runs],
+        {snapshot.backend_name: runtime for snapshot, runtime, _ in runs},
+        {snapshot.backend_name: report for snapshot, _, report in runs},
+    )
+
+
+def _compare_snapshots(
+    case: ReplayCase,
+    baseline: BackendSnapshot,
+    candidate: BackendSnapshot,
+    runtime_metadata: dict[str, dict[str, object]],
+) -> tuple[list[DiffEntry], dict[str, object]]:
+    diffs = diff_backend_snapshots(case=case, left=baseline, right=candidate)
+    return diffs, build_comparison_report(
+        case,
+        backend_a=baseline.backend_name,
+        backend_b=candidate.backend_name,
+        diffs=diffs,
+        runtime_context={
+            baseline.backend_name: runtime_metadata[baseline.backend_name],
+            candidate.backend_name: runtime_metadata[candidate.backend_name],
+        },
+    )
+
+
 async def _run_replay_cases(
     adapter_factories: tuple[AdapterFactory, ...],
     *,
@@ -154,30 +190,21 @@ async def _run_replay_cases(
     start_time = perf_counter()
 
     for case in cases:
-        backend_runs = [await _run_case_on_backend(adapter_factory, case) for adapter_factory in adapter_factories]
-        snapshots = [run[0] for run in backend_runs]
-        runtime_metadata = {
-            snapshot.backend_name: runtime_info
-            for snapshot, runtime_info, _ in backend_runs
-        }
-        for snapshot, _, report_metadata in backend_runs:
-            backend_report_metadata.setdefault(snapshot.backend_name, report_metadata)
-        baseline_snapshot = snapshots[0]
+        snapshots, runtime_metadata, report_metadata = await _run_backends(
+            adapter_factories,
+            case,
+        )
+        backend_report_metadata.update(report_metadata)
         comparisons: list[dict[str, object]] = []
         for other_snapshot in snapshots[1:]:
-            diffs = diff_backend_snapshots(case=case, left=baseline_snapshot, right=other_snapshot)
+            diffs, comparison = _compare_snapshots(
+                case,
+                snapshots[0],
+                other_snapshot,
+                runtime_metadata,
+            )
             all_diffs.extend(diffs)
-            comparisons.append(
-                build_comparison_report(
-                    case,
-                    backend_a=baseline_snapshot.backend_name,
-                    backend_b=other_snapshot.backend_name,
-                    diffs=diffs,
-                    runtime_context={
-                        baseline_snapshot.backend_name: runtime_metadata[baseline_snapshot.backend_name],
-                        other_snapshot.backend_name: runtime_metadata[other_snapshot.backend_name],
-                    },
-                ))
+            comparisons.append(comparison)
         case_reports.append(build_case_matrix_report(case, comparisons))
 
     elapsed_seconds = perf_counter() - start_time
@@ -218,50 +245,29 @@ async def _run_acceptance_cases(
     start_time = perf_counter()
     for injected_case in REPLAY_ACCEPTANCE_CASES:
         clean_case = _without_injections(injected_case)
-        backend_runs = [
-            await _run_case_on_backend(adapter_factory, clean_case)
-            for adapter_factory in adapter_factories
-        ]
-        snapshots = [run[0] for run in backend_runs]
-        runtime_metadata = {
-            snapshot.backend_name: runtime_info
-            for snapshot, runtime_info, _ in backend_runs
-        }
-        for snapshot, _, report_metadata in backend_runs:
-            backend_report_metadata.setdefault(snapshot.backend_name, report_metadata)
-        baseline_snapshot = snapshots[0]
+        snapshots, runtime_metadata, report_metadata = await _run_backends(
+            adapter_factories,
+            clean_case,
+        )
+        backend_report_metadata.update(report_metadata)
         normal_comparisons: list[dict[str, object]] = []
         injected_comparisons: list[dict[str, object]] = []
 
         for other_snapshot in snapshots[1:]:
-            runtime_context = {
-                baseline_snapshot.backend_name: runtime_metadata[baseline_snapshot.backend_name],
-                other_snapshot.backend_name: runtime_metadata[other_snapshot.backend_name],
-            }
-            normal_comparisons.append(
-                build_comparison_report(
-                    clean_case,
-                    backend_a=baseline_snapshot.backend_name,
-                    backend_b=other_snapshot.backend_name,
-                    diffs=diff_backend_snapshots(
-                        case=clean_case,
-                        left=baseline_snapshot,
-                        right=other_snapshot,
-                    ),
-                    runtime_context=runtime_context,
-                ))
-            injected_comparisons.append(
-                build_comparison_report(
-                    injected_case,
-                    backend_a=baseline_snapshot.backend_name,
-                    backend_b=other_snapshot.backend_name,
-                    diffs=diff_backend_snapshots(
-                        case=injected_case,
-                        left=baseline_snapshot,
-                        right=other_snapshot,
-                    ),
-                    runtime_context=runtime_context,
-                ))
+            _, normal = _compare_snapshots(
+                clean_case,
+                snapshots[0],
+                other_snapshot,
+                runtime_metadata,
+            )
+            _, injected = _compare_snapshots(
+                injected_case,
+                snapshots[0],
+                other_snapshot,
+                runtime_metadata,
+            )
+            normal_comparisons.append(normal)
+            injected_comparisons.append(injected)
 
         case_reports.append(
             build_acceptance_case_report(
@@ -444,6 +450,8 @@ def test_acceptance_case_count() -> None:
     assert all(not case.runtime_faults for case in REPLAY_ACCEPTANCE_CASES)
     assert len(REPLAY_ALL_CASES) >= len(REPLAY_ACCEPTANCE_CASES)
     assert len(REPLAY_EXTRA_CASES) >= 1
+    case_docs = DEFAULT_REPORT_PATH.with_name("replay_cases.md").read_text(encoding="utf-8")
+    assert all(f"`{case.case_id}`" in case_docs for case in REPLAY_ALL_CASES)
 
 
 def test_allowed_diff_requires_reason_and_protects_summary_lineage() -> None:
@@ -529,55 +537,53 @@ def test_replay_harness_keeps_duplicate_query_names_per_session_alias() -> None:
     assert any("dragon well" in text.lower() for text in second_texts)
 
 
+async def _run_raw_corruption_checks(
+    adapter_factory: AdapterFactory,
+    event_injector: RawInjector,
+    state_injector: RawInjector,
+) -> tuple[list[DiffEntry], list[DiffEntry]]:
+    diffs_by_fault: list[list[DiffEntry]] = []
+    for case_index, injector in ((0, event_injector), (3, state_injector)):
+        case = _without_injections(REPLAY_ACCEPTANCE_CASES[case_index])
+        adapter = adapter_factory()
+        await adapter.setup(case)
+        try:
+            before = await adapter.run_case(case)
+            assert injector(adapter, RawStorageTarget(**adapter.storage_identity()))
+            after = await adapter.read_persisted_snapshot()
+            diffs_by_fault.append(diff_backend_snapshots(case=case, left=before, right=after))
+        finally:
+            await adapter.close()
+    return diffs_by_fault[0], diffs_by_fault[1]
+
+
+def _assert_raw_corruption_paths(
+    event_diffs: list[DiffEntry],
+    state_diffs: list[DiffEntry],
+) -> None:
+    assert {diff.path for diff in event_diffs if not diff.allowed} == {"session.events[0].author"}
+    assert {diff.path for diff in state_diffs if not diff.allowed} == {"state.raw_corruption"}
+
+
 def test_raw_sqlite_corruption_is_detected_after_restart() -> None:
     """Out-of-band event and state corruption must survive restart and be located."""
 
-    async def run() -> tuple[list[DiffEntry], list[DiffEntry]]:
-        event_case = _without_injections(REPLAY_ACCEPTANCE_CASES[0])
-        event_adapter = SqliteReplayAdapter()
-        await event_adapter.setup(event_case)
-        try:
-            before_event = await event_adapter.run_case(event_case)
-            event_identity = RawStorageTarget(**event_adapter.storage_identity())
-            assert inject_sqlite_event_author(
-                event_adapter.session_db_url,
-                event_identity,
+    event_diffs, state_diffs = asyncio.run(
+        _run_raw_corruption_checks(
+            SqliteReplayAdapter,
+            lambda adapter, target: inject_sqlite_event_author(
+                adapter.session_db_url,
+                target,
                 event_id="replay-event-1",
-            )
-            after_event = await event_adapter.read_persisted_snapshot()
-            event_diffs = diff_backend_snapshots(
-                case=event_case,
-                left=before_event,
-                right=after_event,
-            )
-        finally:
-            await event_adapter.close()
-
-        state_case = _without_injections(REPLAY_ACCEPTANCE_CASES[3])
-        state_adapter = SqliteReplayAdapter()
-        await state_adapter.setup(state_case)
-        try:
-            before_state = await state_adapter.run_case(state_case)
-            state_identity = RawStorageTarget(**state_adapter.storage_identity())
-            assert inject_sqlite_session_state(
-                state_adapter.session_db_url,
-                state_identity,
+            ),
+            lambda adapter, target: inject_sqlite_session_state(
+                adapter.session_db_url,
+                target,
                 key="raw_corruption",
                 value="sqlite",
-            )
-            after_state = await state_adapter.read_persisted_snapshot()
-            state_diffs = diff_backend_snapshots(
-                case=state_case,
-                left=before_state,
-                right=after_state,
-            )
-        finally:
-            await state_adapter.close()
-        return event_diffs, state_diffs
-
-    event_diffs, state_diffs = asyncio.run(run())
-    assert {diff.path for diff in event_diffs if not diff.allowed} == {"session.events[0].author"}
-    assert {diff.path for diff in state_diffs if not diff.allowed} == {"state.raw_corruption"}
+            ),
+        ))
+    _assert_raw_corruption_paths(event_diffs, state_diffs)
 
 
 def test_replay_consistency_redis_integration_mode() -> None:
@@ -607,45 +613,15 @@ def test_raw_redis_corruption_is_detected_after_restart() -> None:
     if not redis_url:
         pytest.skip(f"{REDIS_REPLAY_URL_ENV} is not set")
 
-    async def run() -> tuple[list[DiffEntry], list[DiffEntry]]:
-        event_case = _without_injections(REPLAY_ACCEPTANCE_CASES[0])
-        event_adapter = RedisReplayAdapter(redis_url=redis_url)
-        await event_adapter.setup(event_case)
-        try:
-            before_event = await event_adapter.run_case(event_case)
-            event_identity = RawStorageTarget(**event_adapter.storage_identity())
-            assert inject_redis_event_author(redis_url, event_identity)
-            after_event = await event_adapter.read_persisted_snapshot()
-            event_diffs = diff_backend_snapshots(
-                case=event_case,
-                left=before_event,
-                right=after_event,
-            )
-        finally:
-            await event_adapter.close()
-
-        state_case = _without_injections(REPLAY_ACCEPTANCE_CASES[3])
-        state_adapter = RedisReplayAdapter(redis_url=redis_url)
-        await state_adapter.setup(state_case)
-        try:
-            before_state = await state_adapter.run_case(state_case)
-            state_identity = RawStorageTarget(**state_adapter.storage_identity())
-            assert inject_redis_session_state(
+    event_diffs, state_diffs = asyncio.run(
+        _run_raw_corruption_checks(
+            lambda: RedisReplayAdapter(redis_url=redis_url),
+            lambda _, target: inject_redis_event_author(redis_url, target),
+            lambda _, target: inject_redis_session_state(
                 redis_url,
-                state_identity,
+                target,
                 key="raw_corruption",
                 value="redis",
-            )
-            after_state = await state_adapter.read_persisted_snapshot()
-            state_diffs = diff_backend_snapshots(
-                case=state_case,
-                left=before_state,
-                right=after_state,
-            )
-        finally:
-            await state_adapter.close()
-        return event_diffs, state_diffs
-
-    event_diffs, state_diffs = asyncio.run(run())
-    assert {diff.path for diff in event_diffs if not diff.allowed} == {"session.events[0].author"}
-    assert {diff.path for diff in state_diffs if not diff.allowed} == {"state.raw_corruption"}
+            ),
+        ))
+    _assert_raw_corruption_paths(event_diffs, state_diffs)

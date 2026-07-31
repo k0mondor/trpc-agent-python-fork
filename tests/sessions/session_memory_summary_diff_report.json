@@ -72,7 +72,7 @@
       "criterion_id": "AC6",
       "requirement": "Complete lightweight mode within 30 seconds; integrations may be skipped.",
       "status": "passed",
-      "actual": 4.654,
+      "actual": 3.086,
       "threshold": "<= 30 seconds in lightweight mode"
     }
   ],
@@ -88,7 +88,7 @@
   },
   "meta": {
     "mode": "lightweight",
-    "elapsed_seconds": 4.654,
+    "elapsed_seconds": 3.086,
     "backend_names": [
       "inmemory",
       "sqlite"
@@ -931,7 +931,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785502335.408,
+                "summary_timestamp": 1785504420.479,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -1039,16 +1039,6 @@
       "description": "A duplicated event injected during replay must be detected as an event-count mismatch.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "session.events.length"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "session.events.length"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1096,22 +1086,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "duplicate_event_runtime_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "session",
-          "path": "session.events.length",
-          "left": 2,
-          "right": 3,
-          "allowed": false,
-          "session_id": "replay-negative-duplicate-event",
-          "event_index": null,
-          "summary_id": null,
-          "reason": null
-        }
       ]
     },
     {
@@ -1119,16 +1093,6 @@
       "description": "A runtime state corruption must be detected on the precise state path.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "state.preference"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "state.preference"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1176,22 +1140,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "runtime_state_corruption_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "state",
-          "path": "state.preference",
-          "left": "tea",
-          "right": "coffee",
-          "allowed": false,
-          "session_id": "replay-negative-runtime-state",
-          "event_index": null,
-          "summary_id": null,
-          "reason": null
-        }
       ]
     },
     {
@@ -1199,16 +1147,6 @@
       "description": "A runtime summary deletion must be detected as a missing summary.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "summary"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "summary"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1254,7 +1192,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785502335.784,
+                "summary_timestamp": 1785504420.489,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -1272,38 +1210,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "runtime_summary_loss_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "summary",
-          "path": "summary",
-          "left": {
-            "session_id": "replay-negative-runtime-summary-loss",
-            "summary_text": "deterministic-summary[user: Please summarize my sprint notes. user: Please summarize my sprint notes. assistant: Sure, continue. assistant: Sure, continue.]",
-            "original_event_count": 4,
-            "compressed_event_count": 3,
-            "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
-            "version": 1,
-            "replaces": null,
-            "summarized_event_count": 2,
-            "summary_timestamp": 1785502335.784,
-            "metadata": {
-              "replaces": null,
-              "summarized_event_count": 2,
-              "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
-              "version": 1
-            }
-          },
-          "right": null,
-          "allowed": false,
-          "session_id": "replay-negative-runtime-summary-loss",
-          "event_index": null,
-          "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
-          "reason": null
-        }
       ]
     },
     {
@@ -1311,18 +1217,6 @@
       "description": "A runtime summary overwrite must be detected through lineage replacement fields.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "summary.metadata.replaces",
-        "summary.replaces"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "summary.metadata.replaces",
-        "summary.replaces"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1386,36 +1280,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "runtime_summary_overwrite_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "summary",
-          "path": "summary.metadata.replaces",
-          "left": "replay-negative-runtime-summary-overwrite:summary:v1",
-          "right": "wrong-summary-id",
-          "allowed": false,
-          "session_id": "replay-negative-runtime-summary-overwrite",
-          "event_index": null,
-          "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
-          "reason": null
-        },
-        {
-          "case_id": "runtime_summary_overwrite_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "summary",
-          "path": "summary.replaces",
-          "left": "replay-negative-runtime-summary-overwrite:summary:v1",
-          "right": "wrong-summary-id",
-          "allowed": false,
-          "session_id": "replay-negative-runtime-summary-overwrite",
-          "event_index": null,
-          "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
-          "reason": null
-        }
       ]
     },
     {
@@ -1423,16 +1287,6 @@
       "description": "A partial failure that loses the final event but keeps state must be detected as an event-window mismatch.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "session.events.length"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "session.events.length"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1480,22 +1334,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "partial_failure_event_loss_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "session",
-          "path": "session.events.length",
-          "left": 2,
-          "right": 1,
-          "allowed": false,
-          "session_id": "replay-negative-partial-failure",
-          "event_index": null,
-          "summary_id": null,
-          "reason": null
-        }
       ]
     },
     {
@@ -1503,16 +1341,6 @@
       "description": "A runtime summary deletion on a non-active session alias must still be detected through alias-scoped snapshots.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": true,
-      "expected_diff_paths": [
-        "sessions_by_alias.source.summary"
-      ],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [
-        "sessions_by_alias.source.summary"
-      ],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1558,7 +1386,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785502336.633,
+                "summary_timestamp": 1785504421.306,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -1576,38 +1404,6 @@
           ],
           "status": "passed"
         }
-      ],
-      "diffs": [
-        {
-          "case_id": "non_active_session_summary_loss_fault",
-          "backend_a": "inmemory",
-          "backend_b": "sqlite",
-          "scope": "sessions_by_alias",
-          "path": "sessions_by_alias.source.summary",
-          "left": {
-            "session_id": "replay-negative-source-session",
-            "summary_text": "deterministic-summary[user: Please summarize my architecture notes. user: Please summarize my architecture notes. assistant: Sure, continue with the details. assistant: Sure, continue with the details.]",
-            "original_event_count": 4,
-            "compressed_event_count": 3,
-            "summary_id": "replay-negative-source-session:summary:v1",
-            "version": 1,
-            "replaces": null,
-            "summarized_event_count": 2,
-            "summary_timestamp": 1785502336.633,
-            "metadata": {
-              "replaces": null,
-              "summarized_event_count": 2,
-              "summary_id": "replay-negative-source-session:summary:v1",
-              "version": 1
-            }
-          },
-          "right": null,
-          "allowed": false,
-          "session_id": "replay-negative-source-session",
-          "event_index": null,
-          "summary_id": "replay-negative-source-session:summary:v1",
-          "reason": null
-        }
       ]
     },
     {
@@ -1615,12 +1411,6 @@
       "description": "Memory written by one session should remain searchable from another session under the same app/user scope.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": false,
-      "expected_diff_paths": [],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1649,20 +1439,13 @@
           "diffs": [],
           "status": "passed"
         }
-      ],
-      "diffs": []
+      ]
     },
     {
       "case_id": "restart_mid_replay_after_summary",
       "description": "Persistent backends should restore summary state correctly after a restart and continue replaying later turns.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": false,
-      "expected_diff_paths": [],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1691,20 +1474,13 @@
           "diffs": [],
           "status": "passed"
         }
-      ],
-      "diffs": []
+      ]
     },
     {
       "case_id": "state_namespace_roundtrip",
       "description": "App, user, session, and temp state should preserve their intended visibility across sessions and restarts.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": false,
-      "expected_diff_paths": [],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1733,20 +1509,13 @@
           "diffs": [],
           "status": "passed"
         }
-      ],
-      "diffs": []
+      ]
     },
     {
       "case_id": "cross_user_memory_isolation",
       "description": "Memory saved for one user must not become visible to another user in the same application.",
       "scenario_type": "extended",
       "status": "passed",
-      "expects_diffs": false,
-      "expected_diff_paths": [],
-      "allowed_diff_paths": [],
-      "detected_diff_paths": [],
-      "missing_expected_paths": [],
-      "unexpected_diff_paths": [],
       "comparison_count": 1,
       "comparisons": [
         {
@@ -1775,8 +1544,7 @@
           "diffs": [],
           "status": "passed"
         }
-      ],
-      "diffs": []
+      ]
     }
   ]
 }

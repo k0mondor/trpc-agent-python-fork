@@ -18,6 +18,13 @@ from .replay_models import SnapshotMutationOperation
 _PERSISTENT_BACKEND = "persistent"
 
 
+def _text_event(author: str, text: str) -> ReplayStep:
+    """Build the common text-only replay step without repeating SDK model wiring."""
+
+    role = "user" if author == "user" else "model"
+    return ReplayStep.append_event(EventSpec(author=author, role=role, text=text))
+
+
 _BASELINE_CASES: tuple[ReplayCase, ...] = (
     ReplayCase(
         case_id="single_turn_text",
@@ -25,12 +32,8 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         session_id="replay-single-turn",
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Hello, what can you do?"),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I can help answer questions."),
-            ),
+            _text_event("user", "Hello, what can you do?"),
+            _text_event("assistant", "I can help answer questions."),
         ),
     ),
     ReplayCase(
@@ -39,18 +42,10 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         session_id="replay-multi-turn",
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Hello assistant."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Hello, how can I help?"),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember my travel plan."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will remember your travel plan."),
-            ),
+            _text_event("user", "Hello assistant."),
+            _text_event("assistant", "Hello, how can I help?"),
+            _text_event("user", "Please remember my travel plan."),
+            _text_event("assistant", "I will remember your travel plan."),
         ),
     ),
     ReplayCase(
@@ -59,9 +54,7 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         session_id="replay-tool-call",
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Check the Beijing weather."),
-            ),
+            _text_event("user", "Check the Beijing weather."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -96,9 +89,7 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         session_id="replay-memory-state",
         steps=(
             ReplayStep.create_session(initial_state={"user_name": "alice"}),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember that I prefer tea."),
-            ),
+            _text_event("user", "Please remember that I prefer tea."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -107,9 +98,7 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
                     state_delta={"preference": "tea"},
                 ),
             ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Actually update that to green tea."),
-            ),
+            _text_event("user", "Actually update that to green tea."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -131,18 +120,10 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         store_historical_events=True,
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="I am planning a weekend trip."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Great, where would you like to go?"),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="I want to visit Hangzhou."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Hangzhou is known for West Lake."),
-            ),
+            _text_event("user", "I am planning a weekend trip."),
+            _text_event("assistant", "Great, where would you like to go?"),
+            _text_event("user", "I want to visit Hangzhou."),
+            _text_event("assistant", "Hangzhou is known for West Lake."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -155,25 +136,13 @@ _BASELINE_CASES: tuple[ReplayCase, ...] = (
         store_historical_events=True,
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Remember my project is called Atlas."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Got it, your project is Atlas."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="It uses Redis and SQL backends."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Atlas uses Redis and SQL backends."),
-            ),
+            _text_event("user", "Remember my project is called Atlas."),
+            _text_event("assistant", "Got it, your project is Atlas."),
+            _text_event("user", "It uses Redis and SQL backends."),
+            _text_event("assistant", "Atlas uses Redis and SQL backends."),
             ReplayStep.create_summary(force=True),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Also note that replay consistency is critical."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will keep replay consistency in mind."),
-            ),
+            _text_event("user", "Also note that replay consistency is critical."),
+            _text_event("assistant", "I will keep replay consistency in mind."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -198,18 +167,10 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please summarize my travel plan."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Sure, tell me the route."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Shanghai to Hangzhou by train."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="That route is short and convenient."),
-            ),
+            _text_event("user", "Please summarize my travel plan."),
+            _text_event("assistant", "Sure, tell me the route."),
+            _text_event("user", "Shanghai to Hangzhou by train."),
+            _text_event("assistant", "That route is short and convenient."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -230,18 +191,10 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Track my preferences for black coffee."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I noted your coffee preference."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Also remember I dislike sugary drinks."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will avoid sugary drink suggestions."),
-            ),
+            _text_event("user", "Track my preferences for black coffee."),
+            _text_event("assistant", "I noted your coffee preference."),
+            _text_event("user", "Also remember I dislike sugary drinks."),
+            _text_event("assistant", "I will avoid sugary drink suggestions."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -259,9 +212,7 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(initial_state={"user_name": "alice"}),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember that I prefer tea."),
-            ),
+            _text_event("user", "Please remember that I prefer tea."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -289,25 +240,13 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Remember my project codename is Northstar."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="The codename is Northstar."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="It runs on both SQLite and Redis."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Northstar runs on SQLite and Redis."),
-            ),
+            _text_event("user", "Remember my project codename is Northstar."),
+            _text_event("assistant", "The codename is Northstar."),
+            _text_event("user", "It runs on both SQLite and Redis."),
+            _text_event("assistant", "Northstar runs on SQLite and Redis."),
             ReplayStep.create_summary(force=True),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Replay consistency matters a lot."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will keep replay consistency as a priority."),
-            ),
+            _text_event("user", "Replay consistency matters a lot."),
+            _text_event("assistant", "I will keep replay consistency as a priority."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -325,12 +264,8 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please store this reminder."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I stored the reminder."),
-            ),
+            _text_event("user", "Please store this reminder."),
+            _text_event("assistant", "I stored the reminder."),
         ),
     ),
     ReplayCase(
@@ -349,9 +284,7 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(initial_state={"user_name": "alice"}),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember that I prefer tea."),
-            ),
+            _text_event("user", "Please remember that I prefer tea."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -379,18 +312,10 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please summarize my sprint notes."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Sure, continue."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="We fixed replay ordering bugs."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="The replay ordering bugs were fixed."),
-            ),
+            _text_event("user", "Please summarize my sprint notes."),
+            _text_event("assistant", "Sure, continue."),
+            _text_event("user", "We fixed replay ordering bugs."),
+            _text_event("assistant", "The replay ordering bugs were fixed."),
             ReplayStep.create_summary(force=True),
         ),
     ),
@@ -416,31 +341,21 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Remember the codename is Aurora."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="The codename is Aurora."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Aurora runs on SQL and Redis."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Aurora runs on SQL and Redis."),
-            ),
+            _text_event("user", "Remember the codename is Aurora."),
+            _text_event("assistant", "The codename is Aurora."),
+            _text_event("user", "Aurora runs on SQL and Redis."),
+            _text_event("assistant", "Aurora runs on SQL and Redis."),
             ReplayStep.create_summary(force=True),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Replay correctness matters a lot."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will prioritize replay correctness."),
-            ),
+            _text_event("user", "Replay correctness matters a lot."),
+            _text_event("assistant", "I will prioritize replay correctness."),
             ReplayStep.create_summary(force=True),
         ),
     ),
     ReplayCase(
         case_id="partial_failure_event_loss_fault",
-        description="A partial failure that loses the final event but keeps state must be detected as an event-window mismatch.",
+        description=(
+            "A partial failure that loses the final event but keeps state must be detected as an event-window mismatch."
+        ),
         session_id="replay-negative-partial-failure",
         expected_diff_paths=("session.events.length",),
         runtime_faults=(
@@ -452,9 +367,7 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
         ),
         steps=(
             ReplayStep.create_session(initial_state={"user_name": "alice"}),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember that I prefer tea."),
-            ),
+            _text_event("user", "Please remember that I prefer tea."),
             ReplayStep.append_event(
                 EventSpec(
                     author="assistant",
@@ -467,7 +380,9 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
     ),
     ReplayCase(
         case_id="non_active_session_summary_loss_fault",
-        description="A runtime summary deletion on a non-active session alias must still be detected through alias-scoped snapshots.",
+        description=(
+            "A runtime summary deletion on a non-active session alias must still be detected through alias-scoped snapshots."
+        ),
         session_id="replay-negative-target-session",
         enable_summary=True,
         summary_keep_recent_count=2,
@@ -501,9 +416,7 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
             ),
             ReplayStep.create_summary(force=True, session_alias="source"),
             ReplayStep.create_session(session_alias="default", session_id="replay-negative-target-session"),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Switch focus to the current session."),
-            ),
+            _text_event("user", "Switch focus to the current session."),
         ),
     ),
 )
@@ -512,7 +425,9 @@ _NEGATIVE_CASES: tuple[ReplayCase, ...] = (
 _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
     ReplayCase(
         case_id="cross_session_memory_aggregation",
-        description="Memory written by one session should remain searchable from another session under the same app/user scope.",
+        description=(
+            "Memory written by one session should remain searchable from another session under the same app/user scope."
+        ),
         session_id="replay-memory-target",
         steps=(
             ReplayStep.create_session(session_alias="source", session_id="replay-memory-source"),
@@ -526,9 +441,7 @@ _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
             ),
             ReplayStep.store_memory(session_alias="source"),
             ReplayStep.create_session(session_alias="default", session_id="replay-memory-target"),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="What drink did I say I prefer?"),
-            ),
+            _text_event("user", "What drink did I say I prefer?"),
             ReplayStep.search_memory(
                 name="cross_session_preference_search",
                 query="oolong",
@@ -538,46 +451,34 @@ _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
     ),
     ReplayCase(
         case_id="restart_mid_replay_after_summary",
-        description="Persistent backends should restore summary state correctly after a restart and continue replaying later turns.",
+        description=(
+            "Persistent backends should restore summary state correctly after a restart and continue replaying later turns."
+        ),
         session_id="replay-restart-summary",
         enable_summary=True,
         summary_keep_recent_count=2,
         store_historical_events=True,
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="I am planning a Hangzhou trip."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Great, what should I remember?"),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember I need a hotel near West Lake."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will remember the hotel preference."),
-            ),
+            _text_event("user", "I am planning a Hangzhou trip."),
+            _text_event("assistant", "Great, what should I remember?"),
+            _text_event("user", "Please remember I need a hotel near West Lake."),
+            _text_event("assistant", "I will remember the hotel preference."),
             ReplayStep.create_summary(force=True),
             ReplayStep.restart_services(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Also note that I will arrive next Friday."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Arrival next Friday is recorded."),
-            ),
+            _text_event("user", "Also note that I will arrive next Friday."),
+            _text_event("assistant", "Arrival next Friday is recorded."),
             ReplayStep.restart_services(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="I prefer morning check-in if available."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will keep the morning check-in preference."),
-            ),
+            _text_event("user", "I prefer morning check-in if available."),
+            _text_event("assistant", "I will keep the morning check-in preference."),
             ReplayStep.create_summary(force=True),
         ),
     ),
     ReplayCase(
         case_id="state_namespace_roundtrip",
-        description="App, user, session, and temp state should preserve their intended visibility across sessions and restarts.",
+        description=(
+            "App, user, session, and temp state should preserve their intended visibility across sessions and restarts."
+        ),
         session_id="replay-state-namespace-b",
         steps=(
             ReplayStep.create_session(
@@ -613,9 +514,7 @@ _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
                     "draft": "second-session",
                 },
             ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="Second session should inherit shared state only."),
-            ),
+            _text_event("assistant", "Second session should inherit shared state only."),
         ),
     ),
     ReplayCase(
@@ -650,25 +549,19 @@ _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
     ),
     ReplayCase(
         case_id="memory_query_observation_survives_restart",
-        description="Memory query observations should retain their original step-time results across restarts and later writes.",
+        description=(
+            "Memory query observations should retain their original step-time results across restarts and later writes."
+        ),
         session_id="replay-memory-observation",
         steps=(
             ReplayStep.create_session(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Please remember that my favorite tea is oolong."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will remember your oolong preference."),
-            ),
+            _text_event("user", "Please remember that my favorite tea is oolong."),
+            _text_event("assistant", "I will remember your oolong preference."),
             ReplayStep.store_memory(),
             ReplayStep.search_memory(name="tea_preference", query="oolong", limit=5),
             ReplayStep.restart_services(),
-            ReplayStep.append_event(
-                EventSpec(author="user", role="user", text="Also remember that I enjoy jasmine tea."),
-            ),
-            ReplayStep.append_event(
-                EventSpec(author="assistant", role="model", text="I will remember the jasmine preference too."),
-            ),
+            _text_event("user", "Also remember that I enjoy jasmine tea."),
+            _text_event("assistant", "I will remember the jasmine preference too."),
             ReplayStep.store_memory(),
             ReplayStep.search_memory(name="tea_preference", query="jasmine", limit=5),
         ),
