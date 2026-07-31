@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -16,6 +17,11 @@ from examples.skills_code_review_agent.agent import agent as agent_module
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
 from examples.skills_code_review_agent.agent import tools as agent_tools
 from examples.skills_code_review_agent.src.storage.repository import ReviewRepository
+from trpc_agent_sdk.code_executors import DEFAULT_INPUTS_CONTAINER
+from trpc_agent_sdk.code_executors import DEFAULT_SKILLS_CONTAINER
+from trpc_agent_sdk.code_executors import WorkspaceInfo
+from trpc_agent_sdk.code_executors.container import ContainerWorkspaceRuntime
+from trpc_agent_sdk.utils import CommandExecResult
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -80,6 +86,55 @@ def test_run_review_task_persists_human_review_state(tmp_path: Path) -> None:
     assert report.conclusion.value == "needs_human_review"
     assert bundle["report"]["final_verdict"] == "needs_human_review"
     assert bundle["task"]["status"] == "completed"
+
+
+def test_resaving_review_rolls_back_all_rows_on_insert_failure(tmp_path: Path) -> None:
+    """Replacing child rows must be atomic when a later insert fails."""
+
+    db_path = tmp_path / "review.db"
+    config = ReviewAgentConfig(
+        fixture_path=str(FIXTURES_DIR / "security_issue.diff"),
+        output_dir=tmp_path / "outputs",
+        db_path=db_path,
+        runtime="local",
+        dry_run=True,
+        fake_model=True,
+    )
+    task, report = run_review_task(config)
+    repository = ReviewRepository(db_path)
+    original_bundle = repository.get_review_bundle(task.task_id)
+
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TRIGGER reject_reinserted_findings
+            BEFORE INSERT ON findings
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated findings failure');
+            END
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(sqlite3.IntegrityError, match="simulated findings failure"):
+        repository.save_review(
+            task=task,
+            report=report,
+            report_json=json.loads(original_bundle["report"]["report_json"]),
+            report_markdown=original_bundle["report"]["report_markdown"],
+            diff_sha256=original_bundle["input"]["diff_sha256"],
+            runtime_type="local",
+            dry_run=True,
+            fake_model=True,
+            created_at="retry-created",
+            finished_at="retry-finished",
+            total_duration_ms=999,
+        )
+
+    assert repository.get_review_bundle(task.task_id) == original_bundle
 
 
 def test_secret_values_are_redacted_in_reports_and_database(
@@ -328,8 +383,7 @@ def test_container_runtime_dispatches_through_skill_run(monkeypatch, tmp_path: P
     assert task.sandbox_runs
     assert all(run.status.value == "succeeded" for run in task.sandbox_runs)
     assert any(
-        finding.source.value == "skill_script"
-        and finding.title == "Use of eval introduces code execution risk"
+        finding.title == "Use of eval introduces code execution risk"
         for finding in report.findings
     )
     assert run_tool.run_async.await_count == 3
@@ -338,6 +392,62 @@ def test_container_runtime_dispatches_through_skill_run(monkeypatch, tmp_path: P
         assert payload["inputs"][0]["dst"] == "work/inputs/review.diff"
         assert payload["command"].startswith("python scripts/")
     manager.cleanup.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_container_fs_resolves_bound_diff_file_without_docker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The runtime must bind and stage review.diff without requiring Docker."""
+
+    diff_file = tmp_path / "review.diff"
+    diff_file.write_text("diff --git a/a.py b/a.py\n", encoding="utf-8")
+    create_runtime = Mock(return_value=object())
+    monkeypatch.setattr(agent_tools, "create_container_workspace_runtime", create_runtime)
+    agent_tools._create_workspace_runtime(
+        workspace_runtime_type="container",
+        inputs_host=tmp_path,
+    )
+    kwargs = create_runtime.call_args.kwargs
+    input_bind = f"{tmp_path.resolve()}:{DEFAULT_INPUTS_CONTAINER}:ro"
+    assert kwargs["auto_inputs"] is False
+    assert kwargs["host_config"]["network_mode"] == "none"
+    assert input_bind in kwargs["host_config"]["Binds"]
+    assert any(
+        bind.endswith(f":{DEFAULT_SKILLS_CONTAINER}:ro")
+        for bind in kwargs["host_config"]["Binds"]
+    )
+
+    container = Mock()
+    container.exec_run = AsyncMock(
+        return_value=CommandExecResult(
+            stdout="",
+            stderr="",
+            exit_code=0,
+            is_timeout=False,
+        )
+    )
+    runtime = ContainerWorkspaceRuntime(
+        container=container,
+        host_config={"Binds": [input_bind]},
+        auto_inputs=False,
+    )
+    workspace = WorkspaceInfo(id="review", path="/tmp/run/ws_review")
+
+    await runtime.fs()._stage_host_input(
+        workspace,
+        diff_file.resolve().as_posix(),
+        "/tmp/run/ws_review/work/inputs/review.diff",
+        "copy",
+        "work/inputs/review.diff",
+    )
+
+    command = container.exec_run.await_args.kwargs["cmd"]
+    rendered_command = " ".join(command).replace("\\", "/")
+    assert f"{DEFAULT_INPUTS_CONTAINER}/review.diff" in rendered_command
+    assert "/tmp/run/ws_review/work/inputs/review.diff" in rendered_command
+    assert "cp -a" in rendered_command
 
 
 def test_container_setup_failure_is_recorded(monkeypatch, tmp_path: Path) -> None:

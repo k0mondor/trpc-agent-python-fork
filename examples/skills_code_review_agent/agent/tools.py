@@ -14,6 +14,7 @@ from typing import Any
 
 from trpc_agent_sdk.agents import BaseAgent
 from trpc_agent_sdk.code_executors import BaseWorkspaceRuntime
+from trpc_agent_sdk.code_executors import DEFAULT_INPUTS_CONTAINER
 from trpc_agent_sdk.code_executors import DEFAULT_SKILLS_CONTAINER
 from trpc_agent_sdk.code_executors import create_container_workspace_runtime
 from trpc_agent_sdk.code_executors import create_local_workspace_runtime
@@ -55,6 +56,7 @@ class _SkillExecutionAgent(BaseAgent):
 def create_skill_tool_set(
     workspace_runtime_type: str = "local",
     *,
+    inputs_host: str | Path | None = None,
     use_cached_repository: bool = True,
 ) -> tuple[SkillToolSet, BaseSkillRepository]:
     """Create a SkillToolSet for the code-review skill example."""
@@ -64,7 +66,10 @@ def create_skill_tool_set(
         "save_as_artifacts": False,
         "omit_inline_content": False,
     }
-    workspace_runtime = _create_workspace_runtime(workspace_runtime_type=workspace_runtime_type)
+    workspace_runtime = _create_workspace_runtime(
+        workspace_runtime_type=workspace_runtime_type,
+        inputs_host=inputs_host,
+    )
     skill_paths = _get_skill_roots()
     repository = create_default_skill_repository(
         *skill_paths,
@@ -395,6 +400,7 @@ async def _execute_skill_scripts_async(
     _ = project_root
     tool_set, repository = create_skill_tool_set(
         workspace_runtime_type=runtime,
+        inputs_host=diff_file.parent,
         use_cached_repository=False,
     )
     service = InMemorySessionService()
@@ -620,15 +626,32 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
 def _create_workspace_runtime(
     *,
     workspace_runtime_type: str = "local",
+    inputs_host: str | Path | None = None,
     **kwargs: Any,
 ) -> BaseWorkspaceRuntime:
     """Create a workspace runtime for skill execution demos."""
 
     if workspace_runtime_type == "container":
         skill_root = _get_skill_roots()[0]
-        host_config = {"Binds": [f"{skill_root}:{DEFAULT_SKILLS_CONTAINER}:ro"]}
+        binds = [f"{skill_root}:{DEFAULT_SKILLS_CONTAINER}:ro"]
+        if inputs_host is not None:
+            resolved_inputs_host = Path(inputs_host).expanduser().resolve()
+            if not resolved_inputs_host.is_dir():
+                raise FileNotFoundError(
+                    f"container inputs host is not a directory: {resolved_inputs_host}"
+                )
+            binds.append(
+                f"{resolved_inputs_host}:{DEFAULT_INPUTS_CONTAINER}:ro"
+            )
+        host_config = {
+            "Binds": binds,
+            "network_mode": "none",
+        }
         kwargs["host_config"] = host_config
-        kwargs["auto_inputs"] = True
+        # Each skill_run payload stages review.diff explicitly. Disabling the
+        # whole-directory auto-map prevents a duplicate copy into a read-only
+        # work/inputs symlink while retaining bind-based host:// resolution.
+        kwargs["auto_inputs"] = False
         return create_container_workspace_runtime(**kwargs)
     if workspace_runtime_type == "local":
         return create_local_workspace_runtime(**kwargs)

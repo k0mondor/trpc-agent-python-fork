@@ -19,7 +19,7 @@ from ..src.filter_policy import evaluate_invocations
 from ..src.input_loader import load_review_input
 from ..src.redactor import redact_report, redact_task
 from ..src.report_writer import build_report_payload, render_markdown_report, write_report_files
-from ..src.rule_engine import run_rule_engine
+from ..src.rule_engine import run_rule_engine, security_finding_spec
 from ..src.review_types import (
     DiffLineType,
     FindingDisposition,
@@ -372,55 +372,29 @@ def _sandbox_output_findings(task: ReviewTask, sandbox_run) -> list[ReviewFindin
 def _linter_warning_to_finding(task: ReviewTask, warning: str) -> ReviewFinding | None:
     """Map deterministic linter warnings onto the canonical finding schema."""
 
-    warning_map = {
-        "Security-sensitive call detected: eval": {
-            "needle": "eval(",
-            "severity": ReviewSeverity.HIGH,
-            "title": "Use of eval introduces code execution risk",
-            "recommendation": (
-                "Replace eval with explicit parsing, a whitelist-based dispatcher, "
-                "or a safe literal parser."
-            ),
-            "confidence": 0.99,
-        },
-        "Shell execution enabled in subprocess call": {
-            "needle": "shell=True",
-            "severity": ReviewSeverity.HIGH,
-            "title": "subprocess call enables shell execution",
-            "recommendation": (
-                "Pass an argument list and avoid shell=True unless a reviewed shell command "
-                "is unavoidable."
-            ),
-            "confidence": 0.96,
-        },
-        "TLS verification disabled": {
-            "needle": "verify=False",
-            "severity": ReviewSeverity.MEDIUM,
-            "title": "TLS certificate verification is disabled",
-            "recommendation": (
-                "Keep certificate verification enabled or document a controlled "
-                "test-only exception."
-            ),
-            "confidence": 0.89,
-        },
-    }
-    mapped = warning_map.get(warning)
-    if mapped is None:
+    base_spec = security_finding_spec(warning)
+    if base_spec is None:
         return None
 
     file_path, line_number, evidence = _find_added_line_evidence(
         task,
-        needle=mapped["needle"],
+        needle=base_spec.needle,
     )
+    spec = security_finding_spec(
+        warning,
+        path=file_path,
+        context=evidence,
+    )
+    assert spec is not None
     return ReviewFinding(
-        severity=mapped["severity"],
+        severity=spec.severity,
         category=ReviewCategory.SECURITY,
         file=file_path,
         line=line_number,
-        title=mapped["title"],
+        title=spec.title,
         evidence=evidence,
-        recommendation=mapped["recommendation"],
-        confidence=mapped["confidence"],
+        recommendation=spec.recommendation,
+        confidence=spec.confidence,
         source=FindingSource.SKILL_SCRIPT,
     )
 

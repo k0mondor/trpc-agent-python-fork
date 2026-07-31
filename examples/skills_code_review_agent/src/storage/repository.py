@@ -9,6 +9,16 @@ from pathlib import Path
 from ..review_types import ReviewReport, ReviewTask
 from .init_db import initialize_database
 
+_BUNDLE_TABLES = frozenset(
+    {
+        "filter_decisions",
+        "findings",
+        "review_inputs",
+        "review_reports",
+        "sandbox_runs",
+    }
+)
+
 
 class ReviewRepository:
     """Small SQLite repository for review tasks and related records."""
@@ -35,6 +45,7 @@ class ReviewRepository:
 
         connection = self._connect()
         try:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
                 INSERT OR REPLACE INTO review_tasks (
@@ -162,6 +173,9 @@ class ReviewRepository:
                 ),
             )
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
 
@@ -203,8 +217,9 @@ def _fetch_one(
 ) -> dict[str, object] | None:
     """Fetch a single row by task id."""
 
+    validated_table = _validated_table_name(table_name)
     row = connection.execute(
-        f"SELECT * FROM {table_name} WHERE task_id = ?",
+        f"SELECT * FROM {validated_table} WHERE task_id = ?",
         (task_id,),
     ).fetchone()
     return dict(row) if row is not None else None
@@ -217,11 +232,20 @@ def _fetch_many(
 ) -> list[dict[str, object]]:
     """Fetch all rows by task id."""
 
+    validated_table = _validated_table_name(table_name)
     rows = connection.execute(
-        f"SELECT * FROM {table_name} WHERE task_id = ?",
+        f"SELECT * FROM {validated_table} WHERE task_id = ?",
         (task_id,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _validated_table_name(table_name: str) -> str:
+    """Allow only internal bundle tables in dynamically assembled queries."""
+
+    if table_name not in _BUNDLE_TABLES:
+        raise ValueError(f"unsupported review table: {table_name!r}")
+    return table_name
 
 
 def _count_hunks(task: ReviewTask) -> int:

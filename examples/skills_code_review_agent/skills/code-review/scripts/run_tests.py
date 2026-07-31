@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     diff_text = diff_path.read_text(encoding="utf-8")
     changed_test_files = extract_changed_test_files(diff_text)
     payload = {
-        "diff_file": str(diff_path),
+        "diff_file": diff_path.name,
         "changed_test_files": changed_test_files,
         "test_update_present": bool(changed_test_files),
     }

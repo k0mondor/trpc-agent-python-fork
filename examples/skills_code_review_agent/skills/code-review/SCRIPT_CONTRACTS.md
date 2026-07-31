@@ -69,6 +69,10 @@ Output:
 
 ## Shared Expectations
 
+- `diff_file` is a stable basename, never an absolute host or container path
+- `parse_diff.py` and `run_tests.py` emit audit/telemetry summaries only
+- only `run_linters.py` warnings are promoted into structured review findings;
+  the rule engine owns overlapping diff-shape and missing-test findings
 - scripts should stay deterministic
 - scripts should not require network access
 - scripts should be safe to run in dry-run and fake-model modes

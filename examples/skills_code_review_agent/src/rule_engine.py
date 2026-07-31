@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import NamedTuple
 
 from .review_types import (
     ChangedFile,
@@ -16,6 +17,51 @@ from .review_types import (
     ReviewFinding,
     ReviewSeverity,
 )
+
+EVAL_WARNING = "Security-sensitive call detected: eval"
+SHELL_WARNING = "Shell execution enabled in subprocess call"
+TLS_WARNING = "TLS verification disabled"
+
+
+class SecurityFindingSpec(NamedTuple):
+    needle: str
+    severity: ReviewSeverity
+    title: str
+    recommendation: str
+    confidence: float
+
+
+_SECURITY_SPECS = {
+    EVAL_WARNING: SecurityFindingSpec(
+        "eval(", ReviewSeverity.HIGH, "Use of eval introduces code execution risk",
+        "Replace eval with explicit parsing, a whitelist-based dispatcher, or a safe literal parser.", 0.98,
+    ),
+    SHELL_WARNING: SecurityFindingSpec(
+        "shell=True", ReviewSeverity.HIGH, "subprocess call enables shell execution",
+        "Pass an argument list and avoid shell=True unless a reviewed shell command is unavoidable.", 0.95,
+    ),
+    TLS_WARNING: SecurityFindingSpec(
+        "verify=False", ReviewSeverity.MEDIUM, "TLS certificate verification is disabled",
+        "Keep certificate verification enabled or document a controlled test-only exception.", 0.88,
+    ),
+}
+
+
+def security_finding_spec(
+    warning: str, *, path: str = "", context: str = ""
+) -> SecurityFindingSpec | None:
+    """Return shared rule metadata with the test-only TLS adjustment."""
+
+    spec = _SECURITY_SPECS.get(warning)
+    if spec and warning == TLS_WARNING and _looks_like_test_or_mock_context(path, context):
+        return spec._replace(
+            recommendation=(
+                "If this is test-only code, isolate the exception clearly; "
+                "otherwise keep TLS verification enabled."
+            ),
+            confidence=0.58,
+        )
+    return spec
 
 _SECRET_PATTERNS: list[tuple[re.Pattern[str], str, str, ReviewSeverity, float]] = [
     (
@@ -121,27 +167,30 @@ def _check_security_rules(changed_file: ChangedFile) -> list[ReviewFinding]:
     for hunk, index, line in _iter_added_lines(changed_file):
         text = line.text.strip()
         context = _line_context(hunk, index)
+        code_text = _executable_python_text(text, changed_file.display_path)
 
         if _looks_like_comment(text):
             continue
 
-        if re.search(r"\beval\s*\(", text):
+        if re.search(r"\beval\s*\(", code_text):
+            spec = security_finding_spec(
+                EVAL_WARNING,
+                path=changed_file.display_path,
+                context=context,
+            )
             findings.append(
                 _make_finding(
                     category=ReviewCategory.SECURITY,
-                    severity=ReviewSeverity.HIGH,
+                    severity=spec.severity,
                     changed_file=changed_file,
                     line=line,
-                    title="Use of eval introduces code execution risk",
+                    title=spec.title,
                     evidence=context,
-                    recommendation=(
-                        "Replace eval with explicit parsing, a whitelist-based dispatcher, "
-                        "or a safe literal parser."
-                    ),
-                    confidence=0.98,
+                    recommendation=spec.recommendation,
+                    confidence=spec.confidence,
                 )
             )
-        if re.search(r"\bexec\s*\(", text):
+        if re.search(r"\bexec\s*\(", code_text):
             findings.append(
                 _make_finding(
                     category=ReviewCategory.SECURITY,
@@ -154,7 +203,7 @@ def _check_security_rules(changed_file: ChangedFile) -> list[ReviewFinding]:
                     confidence=0.98,
                 )
             )
-        if "pickle.loads(" in text:
+        if "pickle.loads(" in code_text:
             findings.append(
                 _make_finding(
                     category=ReviewCategory.SECURITY,
@@ -170,8 +219,8 @@ def _check_security_rules(changed_file: ChangedFile) -> list[ReviewFinding]:
                 )
             )
         if (
-            "yaml.load(" in text
-            and "safe_load" not in text
+            "yaml.load(" in code_text
+            and "safe_load" not in code_text
             and "SafeLoader" not in context
             and "Loader=yaml.SafeLoader" not in context
         ):
@@ -187,41 +236,40 @@ def _check_security_rules(changed_file: ChangedFile) -> list[ReviewFinding]:
                     confidence=0.94,
                 )
             )
-        if "verify=False" in text:
-            confidence = 0.88
-            severity = ReviewSeverity.MEDIUM
-            recommendation = (
-                "Keep certificate verification enabled or document a controlled test-only exception."
+        if re.search(r"verify\s*=\s*False", code_text):
+            spec = security_finding_spec(
+                TLS_WARNING,
+                path=changed_file.display_path,
+                context=context,
             )
-            if _looks_like_test_or_mock_context(changed_file.display_path, context):
-                confidence = 0.58
-                recommendation = (
-                    "If this is test-only code, isolate the exception clearly; otherwise keep TLS "
-                    "verification enabled."
-                )
             findings.append(
                 _make_finding(
                     category=ReviewCategory.SECURITY,
-                    severity=severity,
+                    severity=spec.severity,
                     changed_file=changed_file,
                     line=line,
-                    title="TLS certificate verification is disabled",
+                    title=spec.title,
                     evidence=context,
-                    recommendation=recommendation,
-                    confidence=confidence,
+                    recommendation=spec.recommendation,
+                    confidence=spec.confidence,
                 )
             )
-        if _is_subprocess_shell_risk(text=text, context=context):
+        if _is_subprocess_shell_risk(text=code_text, context=context):
+            spec = security_finding_spec(
+                SHELL_WARNING,
+                path=changed_file.display_path,
+                context=context,
+            )
             findings.append(
                 _make_finding(
                     category=ReviewCategory.SECURITY,
-                    severity=ReviewSeverity.HIGH,
+                    severity=spec.severity,
                     changed_file=changed_file,
                     line=line,
-                    title="subprocess call enables shell execution",
+                    title=spec.title,
                     evidence=context,
-                    recommendation="Pass an argument list and avoid shell=True unless a reviewed shell command is unavoidable.",
-                    confidence=0.95,
+                    recommendation=spec.recommendation,
+                    confidence=spec.confidence,
                 )
             )
 
@@ -516,11 +564,18 @@ def _looks_like_test_or_mock_context(path: str, context: str) -> bool:
     """Return whether a security smell appears in test-only or mock-like code."""
 
     normalized_path = path.replace("\\", "/").lower()
-    lowered_context = context.lower()
     return _is_test_path(normalized_path) or any(
-        token in lowered_context
+        token in context.lower()
         for token in ("localhost", "127.0.0.1", "example.com", "mock", "fixture", "test")
     )
+
+
+def _executable_python_text(text: str, path: str) -> str:
+    """Remove Python comments and strings before matching executable tokens."""
+
+    if not path.lower().endswith(".py"):
+        return text
+    return re.sub(r'''(["']).*?\1''', "", text).split("#", maxsplit=1)[0]
 
 
 def _is_subprocess_shell_risk(*, text: str, context: str) -> bool:

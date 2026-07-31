@@ -107,6 +107,10 @@ def test_linter_scans_only_added_diff_lines(
 -subprocess.run(command, shell=True)
 +result = safe_parse(payload)
 +subprocess.run(command, check=True)
++value = ast.literal_eval(payload)
++EVAL_NEEDLE = "eval("
++SHELL_NEEDLE = "shell=True"
++TLS_NEEDLE = "verify=False"
 """,
         encoding="utf-8",
     )
@@ -125,7 +129,10 @@ def test_linter_scans_only_added_diff_lines(
     )
 
     assert completed.returncode == 0
-    assert json.loads(completed.stdout)["warnings"] == []
+    payload = json.loads(completed.stdout)
+    assert payload["warnings"] == []
+    assert payload["diff_file"] == diff_file.name
+    assert str(tmp_path) not in completed.stdout
 
 
 @pytest.mark.parametrize("skill_dir", [SKILL_DIR, EXAMPLE_SKILL_DIR])
@@ -163,6 +170,7 @@ diff --git "a/tests/incomplete.py
         "tests/test_new.py",
     ]
     assert payload["test_update_present"] is True
+    assert payload["diff_file"] == diff_file.name
 
 
 def test_skill_repository_indexes_root_code_review_skill() -> None:

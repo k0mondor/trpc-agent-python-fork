@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     diff_path = Path(args.diff_file).expanduser().resolve()
     diff_text = diff_path.read_text(encoding="utf-8")
     payload = {
-        "diff_file": str(diff_path),
+        "diff_file": diff_path.name,
         "line_count": len(diff_text.splitlines()),
         "file_count": diff_text.count("diff --git "),
         "has_security_keywords": any(

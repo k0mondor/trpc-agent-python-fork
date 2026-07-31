@@ -67,53 +67,45 @@ def load_git_workspace_diff(
 
     repo_dir = _ensure_existing_path(repo_path)
     pathspec = list(changed_paths or [])
-    command = [
-        "git",
-        "-C",
-        str(repo_dir),
-        "diff",
-        "--no-ext-diff",
-        "HEAD",
-        "--",
-        *pathspec,
-    ]
-
-    completed = _run_git_diff(command, operation="git diff HEAD")
-    if completed.returncode == 0:
-        return completed.stdout
-
-    if "bad revision 'HEAD'" not in completed.stderr and "unknown revision" not in completed.stderr:
-        raise RuntimeError(
-            "failed to collect git diff: "
-            f"{completed.stderr.strip() or completed.stdout.strip() or 'unknown error'}"
-        )
-
-    fallback = _run_git_diff(
+    head_check = _run_git_command(
         [
             "git",
             "-C",
             str(repo_dir),
-            "diff",
-            "--no-ext-diff",
-            "--",
-            *pathspec,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "HEAD",
         ],
-        operation="fallback git diff",
+        operation="git rev-parse HEAD",
     )
-    if fallback.returncode != 0:
+    if head_check.returncode not in {0, 1}:
         raise RuntimeError(
-            "failed to collect fallback git diff: "
-            f"{fallback.stderr.strip() or fallback.stdout.strip() or 'unknown error'}"
+            "failed to determine whether git HEAD exists: "
+            f"{head_check.stderr.strip() or head_check.stdout.strip() or 'unknown error'}"
         )
-    return fallback.stdout
+
+    operation = "git diff HEAD" if head_check.returncode == 0 else "fallback git diff"
+    command = ["git", "-C", str(repo_dir), "diff", "--no-ext-diff"]
+    if head_check.returncode == 0:
+        command.append("HEAD")
+    command.extend(["--", *pathspec])
+
+    completed = _run_git_command(command, operation=operation)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"failed to collect {operation}: "
+            f"{completed.stderr.strip() or completed.stdout.strip() or 'unknown error'}"
+        )
+    return completed.stdout
 
 
-def _run_git_diff(
+def _run_git_command(
     command: list[str],
     *,
     operation: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a git diff command with a bounded execution time."""
+    """Run a read-only git command with a bounded execution time."""
 
     try:
         return subprocess.run(

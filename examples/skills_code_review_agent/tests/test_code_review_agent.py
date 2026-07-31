@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from examples.skills_code_review_agent.agent.agent import run_review_task
+from examples.skills_code_review_agent.agent.agent import (
+    _linter_warning_to_finding,
+    run_review_task,
+)
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
 from examples.skills_code_review_agent.run_agent import build_parser, parse_args
 from examples.skills_code_review_agent.src import input_loader as input_loader_module
@@ -31,9 +34,11 @@ from examples.skills_code_review_agent.src.review_types import (
     ReviewCategory,
     ReviewConclusion,
     ReviewFinding,
+    ReviewInput,
     ReviewInputKind,
     ReviewSeverity,
     ReviewStatus,
+    ReviewTask,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -143,7 +148,13 @@ def test_load_review_input_requires_exactly_one_source(tmp_path: Path) -> None:
 def test_load_git_workspace_diff_times_out(monkeypatch, tmp_path: Path) -> None:
     """A stalled git command should fail with a bounded, actionable error."""
 
+    call_count = 0
+
     def raise_timeout(command, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return subprocess.CompletedProcess(command, 0, stdout="HEAD\n", stderr="")
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
     monkeypatch.setattr(input_loader_module.subprocess, "run", raise_timeout)
@@ -169,9 +180,9 @@ def test_load_git_workspace_diff_fallback_times_out(
         if call_count == 1:
             return subprocess.CompletedProcess(
                 command,
-                128,
+                1,
                 stdout="",
-                stderr="fatal: bad revision 'HEAD'",
+                stderr="",
             )
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
@@ -195,6 +206,13 @@ def test_load_git_workspace_diff_uses_text_only_patch(
     def return_binary_summary(command, **kwargs):
         observed_commands.append(command)
         assert kwargs["timeout"] == GIT_DIFF_TIMEOUT_SECONDS
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="HEAD\n",
+                stderr="",
+            )
         return subprocess.CompletedProcess(
             command,
             0,
@@ -219,6 +237,35 @@ def test_load_git_workspace_diff_uses_text_only_patch(
     assert parsed.changed_files_count == 1
     assert parsed.added_lines_count == 0
     assert parsed.deleted_lines_count == 0
+
+
+@pytest.mark.parametrize(
+    ("head_status", "diff_status", "stderr"),
+    [(0, 128, "fatal: invalid pathspec magic 'invalid'"), (1, 0, "")],
+)
+def test_load_git_workspace_diff_distinguishes_pathspec_and_missing_head(
+    monkeypatch, tmp_path: Path, head_status: int, diff_status: int, stderr: str
+) -> None:
+    """Only a missing HEAD may select the fallback diff command."""
+
+    observed_commands: list[list[str]] = []
+
+    def run_git(command, **kwargs):
+        del kwargs
+        observed_commands.append(command)
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, head_status, stdout="", stderr="")
+        return subprocess.CompletedProcess(command, diff_status, stdout="workspace diff", stderr=stderr)
+
+    monkeypatch.setattr(input_loader_module.subprocess, "run", run_git)
+
+    if diff_status:
+        with pytest.raises(RuntimeError, match="invalid pathspec magic"):
+            load_git_workspace_diff(tmp_path, changed_paths=[":(invalid)"])
+    else:
+        assert load_git_workspace_diff(tmp_path) == "workspace diff"
+    assert len(observed_commands) == 2
+    assert ("HEAD" in observed_commands[1]) is (head_status == 0)
 
 
 def test_parse_args_reads_diff_file_mode() -> None:
@@ -271,18 +318,32 @@ def test_redactor_covers_secret_like_assignments_without_hiding_identifiers() ->
 
 
 @pytest.mark.parametrize(
-    ("script_body", "expected_reason"),
+    ("script_body", "expected_reason", "expected_decision"),
     [
-        ('import os\nos.system("rm -rf /tmp/example")\n', "dangerous_command"),
+        ('import os\nos.system("rm -rf /tmp/example")\n', "dangerous_command", "deny"),
+        ('import subprocess\nsubprocess.run(["rm", "-rf", "/tmp"])\n', "dangerous_command", "deny"),
         (
             'import requests\nrequests.get("https://example.com")\n',
             "network_not_allowed",
+            "deny",
+        ),
+        (
+            "from requests import get as fetch\nfetch('https://example.com')\n",
+            "network_not_allowed",
+            "deny",
+        ),
+        (
+            '"""requests.get("https://example.com")"""\n'
+            "# rm -rf is documentation only\n",
+            "allow",
+            "allow",
         ),
     ],
 )
 def test_filter_inspects_executable_skill_script_content(
     script_body: str,
     expected_reason: str,
+    expected_decision: str,
     tmp_path: Path,
 ) -> None:
     """Governance must inspect the script that will execute, not only fixed argv."""
@@ -312,7 +373,7 @@ def test_filter_inspects_executable_skill_script_content(
     )
 
     assert evaluated[0][1].reason_code == expected_reason
-    assert evaluated[0][1].decision.value == "deny"
+    assert evaluated[0][1].decision.value == expected_decision
 
 
 def test_run_review_task_surfaces_missing_tests_for_code_only_change(tmp_path: Path) -> None:
@@ -436,6 +497,42 @@ def test_rule_engine_ignores_safe_security_patterns_and_comments() -> None:
     assert not any(item.category == ReviewCategory.SECURITY for item in findings)
 
 
+def test_linter_and_rule_engine_share_test_context_confidence() -> None:
+    """Skill warnings and deterministic rules must classify test-only TLS alike."""
+
+    diff_text = (
+        """diff --git a/tests/test_client.py b/tests/test_client.py
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -1 +1,2 @@
+ def test_client():
++    requests.get("https://example.com", verify="""
+        + "False)\n"
+    )
+    parsed = parse_unified_diff(diff_text)
+    task = ReviewTask(
+        task_id="shared-security-context",
+        status=ReviewStatus.RUNNING,
+        review_input=ReviewInput(
+            kind=ReviewInputKind.FIXTURE,
+            source="test fixture",
+            diff_text=diff_text,
+        ),
+        parsed_diff=parsed,
+    )
+
+    skill_finding = _linter_warning_to_finding(task, "TLS verification disabled")
+    rule_finding = next(
+        finding
+        for finding in run_rule_engine(parsed)
+        if finding.title == "TLS certificate verification is disabled"
+    )
+
+    assert skill_finding is not None
+    assert skill_finding.confidence == rule_finding.confidence == 0.58
+    assert skill_finding.recommendation == rule_finding.recommendation
+
+
 def test_rule_engine_ignores_placeholder_secret_values() -> None:
     """Example credentials should not be treated as real leaked secrets."""
 
@@ -543,8 +640,8 @@ def test_run_review_task_with_security_fixture_returns_failure(tmp_path: Path) -
     assert any(item.category == ReviewCategory.SECURITY for item in report.findings)
 
 
-def test_local_runtime_promotes_linter_stdout_into_findings(tmp_path: Path) -> None:
-    """Local fallback execution should convert linter stdout warnings into findings."""
+def test_local_runtime_dedupes_linter_and_rule_engine_findings(tmp_path: Path) -> None:
+    """Shared linter diagnostics should not duplicate the canonical rule finding."""
 
     config = ReviewAgentConfig(
         fixture_path=str(FIXTURES_DIR / "security_issue.diff"),
@@ -558,12 +655,18 @@ def test_local_runtime_promotes_linter_stdout_into_findings(tmp_path: Path) -> N
     task, report = run_review_task(config)
 
     assert any(run.status.value == "succeeded" for run in task.sandbox_runs)
-    assert any(
-        finding.source == FindingSource.SKILL_SCRIPT
-        and finding.title == "Use of eval introduces code execution risk"
+    eval_findings = [
+        finding
         for finding in task.findings
-    )
-    assert any(
-        finding.source == FindingSource.SKILL_SCRIPT
-        for finding in report.findings
-    )
+        if finding.title == "Use of eval introduces code execution risk"
+    ]
+    assert len(eval_findings) == 1
+    assert eval_findings[0].source == FindingSource.RULE_ENGINE
+    assert any("Security-sensitive call detected: eval" in run.stdout for run in task.sandbox_runs)
+    assert len(
+        [
+            finding
+            for finding in report.findings
+            if finding.title == "Use of eval introduces code execution risk"
+        ]
+    ) == 1
