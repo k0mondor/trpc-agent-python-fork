@@ -346,13 +346,13 @@ def test_deduper_collapses_same_title_even_if_evidence_differs() -> None:
     assert findings[0].severity == ReviewSeverity.MEDIUM
 
 
-def test_run_review_task_with_security_fixture_returns_failure() -> None:
+def test_run_review_task_with_security_fixture_returns_failure(tmp_path: Path) -> None:
     """Main orchestration should fail the review when high-confidence findings exist."""
 
     config = ReviewAgentConfig(
         fixture_path=str(FIXTURES_DIR / "security_issue.diff"),
-        output_dir=FIXTURES_DIR.parent / "outputs",
-        db_path=FIXTURES_DIR.parent / "review.db",
+        output_dir=tmp_path / "outputs",
+        db_path=tmp_path / "review.db",
         runtime="local",
         dry_run=True,
         fake_model=True,

@@ -5,24 +5,27 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shlex
+import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from time import perf_counter
 from typing import Any
-from uuid import uuid4
 
+from trpc_agent_sdk.agents import BaseAgent
 from trpc_agent_sdk.code_executors import BaseWorkspaceRuntime
 from trpc_agent_sdk.code_executors import DEFAULT_SKILLS_CONTAINER
-from trpc_agent_sdk.code_executors import WorkspacePutFileInfo
-from trpc_agent_sdk.code_executors import WorkspaceRunProgramSpec
-from trpc_agent_sdk.code_executors import WorkspaceStageOptions
 from trpc_agent_sdk.code_executors import create_container_workspace_runtime
 from trpc_agent_sdk.code_executors import create_local_workspace_runtime
+from trpc_agent_sdk.context import InvocationContext
+from trpc_agent_sdk.context import create_agent_context
+from trpc_agent_sdk.context import new_invocation_context_id
+from trpc_agent_sdk.sessions import InMemorySessionService
 from trpc_agent_sdk.skills import BaseSkillRepository
 from trpc_agent_sdk.skills import ENV_SKILLS_ROOT
 from trpc_agent_sdk.skills import SkillToolSet
 from trpc_agent_sdk.skills import create_default_skill_repository
+from trpc_agent_sdk.skills.tools import CopySkillStager
 
 from ..src.filter_policy import SkillScriptInvocation
 from ..src.review_types import SandboxRunRecord, SandboxRunStatus
@@ -30,8 +33,22 @@ from ..src.review_types import SandboxRunRecord, SandboxRunStatus
 SKILL_NAME = "code-review"
 SCRIPT_TIMEOUT_SECONDS = 20
 OUTPUT_LIMIT_CHARS = 4000
-WORKSPACE_SKILL_DIR = f"skills/{SKILL_NAME}"
 WORKSPACE_DIFF_PATH = "work/inputs/review.diff"
+_LOCAL_ENV_ALLOWLIST = frozenset(
+    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PYTHONPATH", "LANG", "LC_ALL"}
+)
+
+
+class _SkillExecutionAgent(BaseAgent):
+    """Context owner for deterministic calls to the public Skill tools."""
+
+    async def _run_async_impl(
+        self,
+        ctx: InvocationContext,
+    ) -> AsyncGenerator[Any, None]:
+        del ctx
+        for event in ():
+            yield event
 
 
 def create_skill_tool_set(
@@ -42,7 +59,8 @@ def create_skill_tool_set(
     """Create a SkillToolSet for the code-review skill example."""
 
     tool_kwargs = {
-        "save_as_artifacts": True,
+        "timeout": SCRIPT_TIMEOUT_SECONDS,
+        "save_as_artifacts": False,
         "omit_inline_content": False,
     }
     workspace_runtime = _create_workspace_runtime(workspace_runtime_type=workspace_runtime_type)
@@ -52,7 +70,15 @@ def create_skill_tool_set(
         workspace_runtime=workspace_runtime,
         use_cached_repository=use_cached_repository,
     )
-    return SkillToolSet(repository=repository, run_tool_kwargs=tool_kwargs), repository
+    return (
+        SkillToolSet(
+            repository=repository,
+            run_tool_kwargs=tool_kwargs,
+            allowed_cmds=["python"],
+            skill_stager=CopySkillStager(),
+        ),
+        repository,
+    )
 
 
 def build_skill_script_plan(
@@ -70,7 +96,7 @@ def build_skill_script_plan(
             script_path=scripts_dir / "parse_diff.py",
             command=[
                 "python",
-                f"{WORKSPACE_SKILL_DIR}/scripts/parse_diff.py",
+                "scripts/parse_diff.py",
                 "--diff-file",
                 WORKSPACE_DIFF_PATH,
             ],
@@ -81,7 +107,7 @@ def build_skill_script_plan(
             script_path=scripts_dir / "run_linters.py",
             command=[
                 "python",
-                f"{WORKSPACE_SKILL_DIR}/scripts/run_linters.py",
+                "scripts/run_linters.py",
                 "--diff-file",
                 WORKSPACE_DIFF_PATH,
             ],
@@ -92,7 +118,7 @@ def build_skill_script_plan(
             script_path=scripts_dir / "run_tests.py",
             command=[
                 "python",
-                f"{WORKSPACE_SKILL_DIR}/scripts/run_tests.py",
+                "scripts/run_tests.py",
                 "--diff-file",
                 WORKSPACE_DIFF_PATH,
             ],
@@ -109,81 +135,206 @@ def build_skill_run_payload(
 ) -> dict[str, Any]:
     """Build a `skill_run` payload for one code-review skill script."""
 
-    output_file = _output_file_for_script(script_name)
+    script_path = Path(script_name)
+    if script_path.name != script_name or script_path.suffix != ".py":
+        raise ValueError(f"invalid skill script name: {script_name!r}")
+
+    resolved_diff = diff_file.expanduser().resolve()
     return {
         "skill": skill_name,
         "cwd": f"$SKILLS_DIR/{skill_name}",
-        "command": (
-            f"python {shlex.quote(f'scripts/{script_name}')} "
-            f"--diff-file {shlex.quote(str(diff_file))} > {shlex.quote(output_file)}"
-        ),
-        "output_files": [output_file],
+        "command": f"python scripts/{script_name} --diff-file {WORKSPACE_DIFF_PATH}",
+        "inputs": [
+            {
+                "src": f"host://{resolved_diff.as_posix()}",
+                "dst": WORKSPACE_DIFF_PATH,
+                "mode": "copy",
+            }
+        ],
+        "timeout": SCRIPT_TIMEOUT_SECONDS,
     }
 
 
-def execute_skill_script(
-    invocation: SkillScriptInvocation,
+def execute_skill_scripts(
+    invocations: list[SkillScriptInvocation],
     *,
     runtime: str,
-    diff_text: str,
+    diff_file: Path,
     project_root: Path | None = None,
     timeout_seconds: int = SCRIPT_TIMEOUT_SECONDS,
     output_limit_chars: int = OUTPUT_LIMIT_CHARS,
-) -> SandboxRunRecord:
-    """Execute a skill script through the configured workspace runtime."""
+) -> list[SandboxRunRecord]:
+    """Run approved scripts without making the Agent manage sandbox internals.
 
-    started = perf_counter()
+    Container execution uses the public ``skill_run`` tool that a real LLM
+    reaches through ``SkillToolSet``. Explicit local mode uses the constrained
+    development fallback so fake-model tests do not require Docker.
+    """
+
+    if not invocations:
+        return []
+    if runtime == "local":
+        return _execute_local_fallback(
+            invocations,
+            diff_file=diff_file,
+            project_root=project_root,
+            timeout_seconds=timeout_seconds,
+            output_limit_chars=output_limit_chars,
+        )
     try:
-        completed = asyncio.run(
-            _run_skill_script_in_workspace(
-                invocation,
+        return asyncio.run(
+            _execute_skill_scripts_async(
+                invocations,
                 runtime=runtime,
-                diff_text=diff_text,
+                diff_file=diff_file,
                 project_root=project_root,
                 timeout_seconds=timeout_seconds,
+                output_limit_chars=output_limit_chars,
             )
         )
-        stdout, stdout_truncated = _truncate_output(
-            _normalize_process_output(completed.stdout),
-            output_limit_chars,
-        )
-        stderr, stderr_truncated = _truncate_output(
-            _normalize_process_output(completed.stderr),
-            output_limit_chars,
-        )
-        status = SandboxRunStatus.TIMED_OUT if completed.timed_out else (
-            SandboxRunStatus.SUCCEEDED
-            if completed.exit_code == 0
-            else SandboxRunStatus.FAILED
-        )
-        return SandboxRunRecord(
-            name=invocation.name,
-            command=[_sanitize_display_value(part) for part in invocation.command],
-            status=status,
-            runtime=runtime,
-            duration_ms=int((perf_counter() - started) * 1000),
-            exit_code=completed.exit_code,
-            stdout=_sanitize_output_text(stdout),
-            stderr=_sanitize_output_text(stderr),
-            timed_out=completed.timed_out,
-            output_truncated=stdout_truncated or stderr_truncated,
-            blocked_by_filter=False,
-        )
     except Exception as exc:  # pylint: disable=broad-except
-        stderr, stderr_truncated = _truncate_output(str(exc), output_limit_chars)
-        return SandboxRunRecord(
-            name=invocation.name,
-            command=[_sanitize_display_value(part) for part in invocation.command],
-            status=SandboxRunStatus.FAILED,
-            runtime=runtime,
-            duration_ms=int((perf_counter() - started) * 1000),
-            exit_code=None,
-            stdout="",
-            stderr=_sanitize_output_text(stderr),
-            timed_out=False,
-            output_truncated=stderr_truncated,
-            blocked_by_filter=False,
-        )
+        return [
+            _failed_sandbox_record(
+                invocation,
+                runtime=runtime,
+                error=exc,
+                output_limit_chars=output_limit_chars,
+            )
+            for invocation in invocations
+        ]
+
+
+def _execute_local_fallback(
+    invocations: list[SkillScriptInvocation],
+    *,
+    diff_file: Path,
+    project_root: Path | None,
+    timeout_seconds: int,
+    output_limit_chars: int,
+) -> list[SandboxRunRecord]:
+    """Run verified bundled scripts for explicit development-local mode only."""
+
+    records: list[SandboxRunRecord] = []
+    local_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in _LOCAL_ENV_ALLOWLIST
+    }
+    cwd = _resolve_project_root(project_root)
+    for invocation in invocations:
+        started = perf_counter()
+        command = [
+            sys.executable,
+            str(invocation.script_path.resolve()),
+            "--diff-file",
+            str(diff_file.expanduser().resolve()),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=local_env,
+                capture_output=True,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+            )
+            stdout, stdout_truncated = _truncate_output(
+                _normalize_process_output(completed.stdout),
+                output_limit_chars,
+            )
+            stderr, stderr_truncated = _truncate_output(
+                _normalize_process_output(completed.stderr),
+                output_limit_chars,
+            )
+            records.append(
+                SandboxRunRecord(
+                    name=invocation.name,
+                    command=[
+                        _sanitize_display_value(part)
+                        for part in invocation.command
+                    ],
+                    status=(
+                        SandboxRunStatus.SUCCEEDED
+                        if completed.returncode == 0
+                        else SandboxRunStatus.FAILED
+                    ),
+                    runtime="local",
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    exit_code=completed.returncode,
+                    stdout=_sanitize_output_text(stdout),
+                    stderr=_sanitize_output_text(stderr),
+                    timed_out=False,
+                    output_truncated=stdout_truncated or stderr_truncated,
+                    blocked_by_filter=False,
+                )
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout, stdout_truncated = _truncate_output(
+                _normalize_process_output(exc.stdout),
+                output_limit_chars,
+            )
+            stderr, stderr_truncated = _truncate_output(
+                _normalize_process_output(exc.stderr),
+                output_limit_chars,
+            )
+            records.append(
+                SandboxRunRecord(
+                    name=invocation.name,
+                    command=[
+                        _sanitize_display_value(part)
+                        for part in invocation.command
+                    ],
+                    status=SandboxRunStatus.TIMED_OUT,
+                    runtime="local",
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    exit_code=None,
+                    stdout=_sanitize_output_text(stdout),
+                    stderr=_sanitize_output_text(stderr),
+                    timed_out=True,
+                    output_truncated=stdout_truncated or stderr_truncated,
+                    blocked_by_filter=False,
+                )
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            records.append(
+                _failed_sandbox_record(
+                    invocation,
+                    runtime="local",
+                    error=exc,
+                    output_limit_chars=output_limit_chars,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                )
+            )
+    return records
+
+
+def _failed_sandbox_record(
+    invocation: SkillScriptInvocation,
+    *,
+    runtime: str,
+    error: Exception,
+    output_limit_chars: int,
+    duration_ms: int = 0,
+) -> SandboxRunRecord:
+    """Convert executor setup or launch failures into auditable records."""
+
+    stderr, truncated = _truncate_output(str(error), output_limit_chars)
+    return SandboxRunRecord(
+        name=invocation.name,
+        command=[_sanitize_display_value(part) for part in invocation.command],
+        status=SandboxRunStatus.FAILED,
+        runtime=runtime,
+        duration_ms=duration_ms,
+        exit_code=None,
+        stdout="",
+        stderr=_sanitize_output_text(stderr),
+        timed_out=False,
+        output_truncated=truncated,
+        blocked_by_filter=False,
+    )
 
 
 def build_blocked_run(
@@ -229,51 +380,134 @@ def _normalize_process_output(text: object) -> str:
     return str(text)
 
 
-async def _run_skill_script_in_workspace(
-    invocation: SkillScriptInvocation,
+async def _execute_skill_scripts_async(
+    invocations: list[SkillScriptInvocation],
     *,
     runtime: str,
-    diff_text: str,
+    diff_file: Path,
     project_root: Path | None,
     timeout_seconds: int,
-) -> Any:
-    """Stage skill inputs into a workspace and execute the script via runtime APIs."""
+    output_limit_chars: int,
+) -> list[SandboxRunRecord]:
+    """Dispatch scripts through ``SkillRunTool`` and reuse one task workspace."""
 
-    workspace_runtime = _create_workspace_runtime(workspace_runtime_type=runtime)
-    manager = workspace_runtime.manager()
-    fs = workspace_runtime.fs()
-    runner = workspace_runtime.runner()
-    exec_id = f"code_review_{invocation.name}_{uuid4().hex}"
-    workspace = await manager.create_workspace(exec_id)
-
+    _ = project_root
+    tool_set, repository = create_skill_tool_set(
+        workspace_runtime_type=runtime,
+        use_cached_repository=False,
+    )
+    service = InMemorySessionService()
+    session = await service.create_session(
+        app_name="skills_code_review_agent",
+        user_id="deterministic-review",
+    )
+    context = InvocationContext(
+        session_service=service,
+        invocation_id=new_invocation_context_id(),
+        agent=_SkillExecutionAgent(name="code_review_skill_executor"),
+        agent_context=create_agent_context(),
+        session=session,
+    )
+    tools = await tool_set.get_tools(context)
+    run_tool = next(tool for tool in tools if tool.name == "skill_run")
+    records: list[SandboxRunRecord] = []
+    workspace_runtime = repository.get_workspace_runtime(context)
     try:
-        skill_dir = resolve_code_review_skill_dir(project_root=project_root)
-        await fs.stage_directory(
-            workspace,
-            str(skill_dir),
-            WORKSPACE_SKILL_DIR,
-            WorkspaceStageOptions(read_only=True, allow_mount=True, mode="copy"),
-        )
-        await fs.put_files(
-            workspace,
-            [
-                WorkspacePutFileInfo(
-                    path=WORKSPACE_DIFF_PATH,
-                    content=diff_text.encode("utf-8"),
-                    mode=0o644,
+        for invocation in invocations:
+            started = perf_counter()
+            try:
+                payload = build_skill_run_payload(
+                    diff_file=diff_file,
+                    script_name=invocation.script_path.name,
                 )
-            ],
-        )
-        return await runner.run_program(
-            workspace,
-            WorkspaceRunProgramSpec(
-                cmd=invocation.command[0],
-                args=invocation.command[1:],
-                timeout=timeout_seconds,
-            ),
-        )
+                payload["timeout"] = timeout_seconds
+                result = await run_tool.run_async(
+                    tool_context=context,
+                    args=payload,
+                )
+                records.append(
+                    _sandbox_record_from_skill_run(
+                        invocation,
+                        result=result,
+                        runtime=runtime,
+                        output_limit_chars=output_limit_chars,
+                        fallback_duration_ms=int((perf_counter() - started) * 1000),
+                    )
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                stderr, truncated = _truncate_output(str(exc), output_limit_chars)
+                records.append(
+                    SandboxRunRecord(
+                        name=invocation.name,
+                        command=[
+                            _sanitize_display_value(part)
+                            for part in invocation.command
+                        ],
+                        status=SandboxRunStatus.FAILED,
+                        runtime=runtime,
+                        duration_ms=int((perf_counter() - started) * 1000),
+                        exit_code=None,
+                        stdout="",
+                        stderr=_sanitize_output_text(stderr),
+                        timed_out=False,
+                        output_truncated=truncated,
+                        blocked_by_filter=False,
+                    )
+                )
     finally:
-        await manager.cleanup(exec_id)
+        try:
+            await workspace_runtime.manager(context).cleanup(session.id, context)
+        except Exception:  # pylint: disable=broad-except
+            pass
+    return records
+
+
+def _sandbox_record_from_skill_run(
+    invocation: SkillScriptInvocation,
+    *,
+    result: dict[str, Any],
+    runtime: str,
+    output_limit_chars: int,
+    fallback_duration_ms: int,
+) -> SandboxRunRecord:
+    """Convert the framework ``skill_run`` result to the report schema."""
+
+    stdout, stdout_truncated = _truncate_output(
+        _normalize_process_output(result.get("stdout")),
+        output_limit_chars,
+    )
+    stderr, stderr_truncated = _truncate_output(
+        _normalize_process_output(result.get("stderr")),
+        output_limit_chars,
+    )
+    timed_out = bool(result.get("timed_out", False))
+    exit_code = result.get("exit_code")
+    status = SandboxRunStatus.TIMED_OUT if timed_out else (
+        SandboxRunStatus.SUCCEEDED
+        if exit_code == 0
+        else SandboxRunStatus.FAILED
+    )
+    framework_output_truncated = any(
+        "truncat" in str(warning).lower()
+        for warning in result.get("warnings", [])
+    )
+    return SandboxRunRecord(
+        name=invocation.name,
+        command=[_sanitize_display_value(part) for part in invocation.command],
+        status=status,
+        runtime=runtime,
+        duration_ms=int(result.get("duration_ms", fallback_duration_ms)),
+        exit_code=exit_code,
+        stdout=_sanitize_output_text(stdout),
+        stderr=_sanitize_output_text(stderr),
+        timed_out=timed_out,
+        output_truncated=(
+            stdout_truncated
+            or stderr_truncated
+            or framework_output_truncated
+        ),
+        blocked_by_filter=False,
+    )
 
 
 def _sanitize_output_text(text: str) -> str:
@@ -392,11 +626,9 @@ def _create_workspace_runtime(
         kwargs["host_config"] = host_config
         kwargs["auto_inputs"] = True
         return create_container_workspace_runtime(**kwargs)
-    return create_local_workspace_runtime(**kwargs)
-
-
-def _output_file_for_script(script_name: str) -> str:
-    """Map a script name to its canonical skill_run output artifact."""
-
-    stem = Path(script_name).stem
-    return f"out/{stem}.json"
+    if workspace_runtime_type == "local":
+        return create_local_workspace_runtime(**kwargs)
+    raise ValueError(
+        f"Unsupported workspace runtime {workspace_runtime_type!r}; "
+        "configure a framework runtime resolver before enabling it."
+    )

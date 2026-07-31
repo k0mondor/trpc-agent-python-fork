@@ -10,7 +10,7 @@ from time import perf_counter
 from uuid import uuid4
 
 from .config import ReviewAgentConfig
-from .tools import build_blocked_run, build_skill_script_plan, execute_skill_script
+from .tools import build_blocked_run, build_skill_script_plan, execute_skill_scripts
 from ..src.deduper import dedupe_and_classify_findings
 from ..src.diff_parser import parse_unified_diff
 from ..src.filter_policy import evaluate_invocations
@@ -85,19 +85,30 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
         diff_file=diff_file_path,
         project_root=Path(__file__).resolve().parents[3],
     )
-    for invocation, decision in evaluate_invocations(
+    evaluated_invocations = evaluate_invocations(
         parsed_diff=parsed_diff,
         runtime=config.runtime,
         invocations=script_plan,
-    ):
+    )
+    approved_invocations = [
+        invocation
+        for invocation, decision in evaluated_invocations
+        if decision.decision == FilterDecisionType.ALLOW
+    ]
+    executed_runs = {
+        run.name: run
+        for run in execute_skill_scripts(
+            approved_invocations,
+            runtime=config.runtime,
+            diff_file=diff_file_path,
+            project_root=Path(__file__).resolve().parents[3],
+        )
+    }
+
+    for invocation, decision in evaluated_invocations:
         task.add_filter_decision(decision)
-        if decision.decision.value == "allow":
-            sandbox_run = execute_skill_script(
-                invocation,
-                runtime=config.runtime,
-                diff_text=task.review_input.diff_text,
-                project_root=Path(__file__).resolve().parents[3],
-            )
+        if decision.decision == FilterDecisionType.ALLOW:
+            sandbox_run = executed_runs[invocation.name]
             task.add_sandbox_run(sandbox_run)
             all_findings.extend(_sandbox_run_findings(task, sandbox_run))
             all_findings.extend(_sandbox_output_findings(task, sandbox_run))

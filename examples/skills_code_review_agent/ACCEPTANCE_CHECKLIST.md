@@ -85,5 +85,5 @@
 
 - README 与最终示例输出是否同步
 - 设计说明是否满足 300-500 字要求
-- 是否需要再补一轮原生 `skill_run` 接入说明
+- 容器路径已通过原生 `skill_run` 接入，并有回归测试验证 Agent 不再手工执行 runtime
 - 是否需要附上最终 sample outputs 供 reviewer 直接查看

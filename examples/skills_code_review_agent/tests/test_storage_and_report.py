@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
@@ -159,35 +158,36 @@ def test_sandbox_failure_is_recorded_without_crashing_task(tmp_path: Path) -> No
     assert report.monitoring_summary["sandbox_run_count"] >= 1
 
 
-def test_container_runtime_executes_via_workspace_runtime(monkeypatch, tmp_path: Path) -> None:
-    """Container runtime should execute through the workspace runtime abstraction."""
+def test_container_runtime_dispatches_through_skill_run(monkeypatch, tmp_path: Path) -> None:
+    """The orchestrator should delegate staging and execution to ``skill_run``."""
 
     manager = Mock()
-    manager.create_workspace = AsyncMock(
-        return_value=SimpleNamespace(id="ws-1", path="/workspace/ws-1")
-    )
     manager.cleanup = AsyncMock()
-
-    fs = Mock()
-    fs.stage_directory = AsyncMock()
-    fs.put_files = AsyncMock()
-
-    runner = Mock()
-    runner.run_program = AsyncMock(
-        return_value=SimpleNamespace(
-            stdout='{"warning_count": 1, "warnings": ["Security-sensitive call detected: eval"]}\n',
-            stderr="",
-            exit_code=0,
-            timed_out=False,
-        )
-    )
-
     runtime = Mock()
     runtime.manager.return_value = manager
-    runtime.fs.return_value = fs
-    runtime.runner.return_value = runner
+    repository = Mock()
+    repository.get_workspace_runtime.return_value = runtime
 
-    monkeypatch.setattr(agent_tools, "_create_workspace_runtime", lambda **_: runtime)
+    run_tool = Mock()
+    run_tool.name = "skill_run"
+    run_tool.run_async = AsyncMock(
+        return_value={
+            "stdout": '{"warning_count": 1, "warnings": ["Security-sensitive call detected: eval"]}\n',
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "duration_ms": 3,
+            "warnings": [],
+        }
+    )
+    tool_set = Mock()
+    tool_set.get_tools = AsyncMock(return_value=[run_tool])
+
+    monkeypatch.setattr(
+        agent_tools,
+        "create_skill_tool_set",
+        lambda **_: (tool_set, repository),
+    )
 
     config = ReviewAgentConfig(
         fixture_path=str(FIXTURES_DIR / "security_issue.diff"),
@@ -210,7 +210,64 @@ def test_container_runtime_executes_via_workspace_runtime(monkeypatch, tmp_path:
         and finding.title == "Use of eval introduces code execution risk"
         for finding in report.findings
     )
-    fs.stage_directory.assert_awaited()
-    fs.put_files.assert_awaited()
-    runner.run_program.assert_awaited()
+    assert run_tool.run_async.await_count == 3
+    for call in run_tool.run_async.await_args_list:
+        payload = call.kwargs["args"]
+        assert payload["inputs"][0]["dst"] == "work/inputs/review.diff"
+        assert payload["command"].startswith("python scripts/")
     manager.cleanup.assert_awaited()
+
+
+def test_container_setup_failure_is_recorded(monkeypatch, tmp_path: Path) -> None:
+    """An unavailable container executor must not crash the review task."""
+
+    monkeypatch.setattr(
+        agent_tools,
+        "create_skill_tool_set",
+        Mock(side_effect=RuntimeError("container runtime unavailable")),
+    )
+    config = ReviewAgentConfig(
+        fixture_path=str(FIXTURES_DIR / "clean.diff"),
+        output_dir=tmp_path / "outputs",
+        db_path=tmp_path / "review.db",
+        runtime="container",
+        dry_run=True,
+        fake_model=True,
+    )
+
+    task, report = run_review_task(config)
+
+    assert task.status.value == "completed"
+    assert all(run.status.value == "failed" for run in task.sandbox_runs)
+    assert all(
+        "container runtime unavailable" in run.stderr
+        for run in task.sandbox_runs
+    )
+    assert any(finding.category.value == "sandbox" for finding in task.findings)
+    assert report.conclusion.value == "needs_human_review"
+
+
+def test_unconfigured_remote_runtime_is_not_executed(monkeypatch, tmp_path: Path) -> None:
+    """Cube/E2B labels must not silently fall back to local host execution."""
+
+    create_tool_set = Mock(side_effect=AssertionError("skill_run must not be called"))
+    monkeypatch.setattr(agent_tools, "create_skill_tool_set", create_tool_set)
+
+    config = ReviewAgentConfig(
+        fixture_path=str(FIXTURES_DIR / "clean.diff"),
+        output_dir=tmp_path / "outputs",
+        db_path=tmp_path / "review.db",
+        runtime="cube",
+        dry_run=True,
+        fake_model=True,
+    )
+
+    task, report = run_review_task(config)
+
+    create_tool_set.assert_not_called()
+    assert all(
+        decision.reason_code == "runtime_not_configured"
+        for decision in task.filter_decisions
+    )
+    assert all(run.status.value == "blocked" for run in task.sandbox_runs)
+    assert report.conclusion.value == "needs_human_review"

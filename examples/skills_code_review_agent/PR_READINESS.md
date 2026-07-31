@@ -27,8 +27,14 @@
 ## Remaining Caution Items
 
 - Hidden-sample recall and false-positive rate cannot be fully proven locally
-- The current pipeline formalizes the skill package and `SkillToolSet` bridge, but the main path still orchestrates script execution directly instead of fully delegating through SDK-native `skill_run`
-- If reviewers want stricter alignment with “through Skill system” wording, we may still want one more follow-up to deepen native `skill_run` integration
+- Container execution now delegates staging, input mapping, timeout, and command
+  execution to SDK-native `skill_run`; the Agent no longer manages workspaces
+  directly
+- The local-only dry-run fallback is explicitly non-isolated and constrained by
+  fixed bundled scripts, argv execution, an environment allowlist, timeout, and
+  output limits
+- Unconfigured Cube/E2B runtimes produce `needs_human_review` and never fall
+  through to host execution
 
 ## Recommendation
 

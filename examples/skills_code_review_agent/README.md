@@ -2,8 +2,8 @@
 
 This example implements a structured code-review agent prototype on top of
 tRPC-Agent-Python. It combines deterministic rule detection, a formal
-`code-review` skill package, filter-based governance, development-local script
-execution, SQLite persistence, and dual-format reports.
+`code-review` skill package, filter-based governance, framework-native
+`skill_run` execution, SQLite persistence, and dual-format reports.
 
 ## What This Example Covers
 
@@ -17,7 +17,9 @@ execution, SQLite persistence, and dual-format reports.
   - database lifecycle issues
 - Finding dedupe and confidence-based routing
 - Filter decisions before sandbox execution
-- Development-local skill-script execution with timeout and output truncation
+- Container execution delegated to `SkillToolSet` / `skill_run`
+- Explicit development-local fallback with fixed argv, environment allowlist,
+  timeout, and output truncation
 - Secret redaction before reporting and persistence
 - SQLite storage for tasks, inputs, findings, sandbox runs, filter decisions, and reports
 - `review_report.json` and `review_report.md` output generation
@@ -87,10 +89,17 @@ python examples/skills_code_review_agent/run_agent.py ^
   --fake-model
 ```
 
-`local` and `container` now share the same workspace-runtime execution path.
-Use `local` for development fallback and `container` when Docker-backed
-isolation is available. Additional remote runtimes such as `cube` and `e2b`
-still require future wiring in this example.
+`container` is the production path: the orchestrator submits structured
+`skill_run` calls and lets the SDK own skill staging, workspace creation,
+runtime execution, and input mapping. The diff path is passed through the
+`inputs` field rather than interpolated into a shell command.
+
+`local` is an explicit development fallback for dry-run and fake-model tests.
+It executes only the bundled, pre-resolved scripts with argv-based process
+creation, an environment-variable allowlist, timeout, and output limits; it is
+not presented as sandbox isolation. `cube` and `e2b` are rejected by the Filter
+as `needs_human_review` until a framework runtime resolver is configured, so
+they never silently fall back to host execution.
 
 ## Outputs
 
@@ -143,10 +152,11 @@ first for repository indexing, skill-script planning, and future isolated runtim
 The example-local copy remains as a fallback so the sample stays readable and
 self-contained.
 
-The agent formalizes the skill package, its scripts, and its `SkillToolSet`
-entrypoints. The main pipeline still owns orchestration, governance,
-persistence, and final reporting so Filter, Storage, and Telemetry stay fully
-auditable inside the example.
+The main pipeline owns review policy, persistence, and reporting. It does not
+manually create workspaces or run container commands: approved production
+invocations are dispatched through the public `skill_run` tool. In fake-model
+mode, the deterministic orchestrator submits the same tool payload directly so
+the sandbox path remains testable without an API key.
 
 ## Test Coverage
 

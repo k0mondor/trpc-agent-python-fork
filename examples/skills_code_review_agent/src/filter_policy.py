@@ -10,6 +10,7 @@ from .review_types import FilterDecisionRecord, FilterDecisionType, ParsedDiff
 _FORBIDDEN_PATH_PARTS = (".git/", ".env", "secrets/", "id_rsa", ".pem")
 _NETWORK_TOKENS = ("http://", "https://", "curl", "wget", "Invoke-WebRequest", "requests.get(")
 _DANGEROUS_TOKENS = ("rm -rf", "del /f", "format ", "shutdown ", "mkfs")
+_IMPLEMENTED_RUNTIMES = frozenset({"local", "container"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -46,7 +47,18 @@ def evaluate_invocations(
             reason="Invocation allowed by default policy.",
         )
 
-        if _contains_forbidden_path(parsed_diff):
+        if runtime not in _IMPLEMENTED_RUNTIMES:
+            decision = FilterDecisionRecord(
+                decision=FilterDecisionType.NEEDS_HUMAN_REVIEW,
+                target=invocation.target,
+                reason_code="runtime_not_configured",
+                reason=(
+                    f"Runtime `{runtime}` is not configured by this example; "
+                    "use the container runtime or wire a framework runtime resolver."
+                ),
+                requires_human_review=True,
+            )
+        elif _contains_forbidden_path(parsed_diff):
             decision = FilterDecisionRecord(
                 decision=FilterDecisionType.DENY,
                 target=invocation.target,

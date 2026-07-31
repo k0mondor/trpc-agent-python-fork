@@ -1,5 +1,5 @@
 {
-  "task_id": "f684c95b-c5a8-41cb-a55e-1eeec9233837",
+  "task_id": "cbbf9db3-dbec-4547-80a2-1291a6322322",
   "conclusion": "fail",
   "findings": [
     {
@@ -59,15 +59,15 @@
       "name": "parse_diff",
       "command": [
         "python",
-        "skills/code-review/scripts/parse_diff.py",
+        "scripts/parse_diff.py",
         "--diff-file",
         "work/inputs/review.diff"
       ],
       "status": "succeeded",
       "runtime": "local",
-      "duration_ms": 3404,
+      "duration_ms": 133,
       "exit_code": 0,
-      "stdout": "{\n  \"diff_file\": \"review.diff\",\n  \"line_count\": 22,\n  \"file_count\": 2,\n  \"has_security_keywords\": true\n}\n",
+      "stdout": "{\n  \"diff_file\": \"examples/skills_code_review_agent/sample_outputs/skill_inputs/cbbf9db3-dbec-4547-80a2-1291a6322322.diff\",\n  \"line_count\": 22,\n  \"file_count\": 2,\n  \"has_security_keywords\": true\n}\n",
       "stderr": "",
       "timed_out": false,
       "output_truncated": false,
@@ -77,15 +77,15 @@
       "name": "run_linters",
       "command": [
         "python",
-        "skills/code-review/scripts/run_linters.py",
+        "scripts/run_linters.py",
         "--diff-file",
         "work/inputs/review.diff"
       ],
       "status": "succeeded",
       "runtime": "local",
-      "duration_ms": 3139,
+      "duration_ms": 131,
       "exit_code": 0,
-      "stdout": "{\n  \"diff_file\": \"review.diff\",\n  \"warning_count\": 2,\n  \"warnings\": [\n    \"Security-sensitive call detected: eval\",\n    \"Shell execution enabled in subprocess call\"\n  ]\n}\n",
+      "stdout": "{\n  \"diff_file\": \"examples/skills_code_review_agent/sample_outputs/skill_inputs/cbbf9db3-dbec-4547-80a2-1291a6322322.diff\",\n  \"warning_count\": 2,\n  \"warnings\": [\n    \"Security-sensitive call detected: eval\",\n    \"Shell execution enabled in subprocess call\"\n  ]\n}\n",
       "stderr": "",
       "timed_out": false,
       "output_truncated": false,
@@ -95,15 +95,15 @@
       "name": "run_tests",
       "command": [
         "python",
-        "skills/code-review/scripts/run_tests.py",
+        "scripts/run_tests.py",
         "--diff-file",
         "work/inputs/review.diff"
       ],
       "status": "succeeded",
       "runtime": "local",
-      "duration_ms": 4462,
+      "duration_ms": 124,
       "exit_code": 0,
-      "stdout": "{\n  \"diff_file\": \"review.diff\",\n  \"changed_test_files\": [\n    \"tests/test_calculator.py\"\n  ],\n  \"test_update_present\": true\n}\n",
+      "stdout": "{\n  \"diff_file\": \"examples/skills_code_review_agent/sample_outputs/skill_inputs/cbbf9db3-dbec-4547-80a2-1291a6322322.diff\",\n  \"changed_test_files\": [\n    \"tests/test_calculator.py\"\n  ],\n  \"test_update_present\": true\n}\n",
       "stderr": "",
       "timed_out": false,
       "output_truncated": false,
@@ -115,7 +115,7 @@
     "high": 2
   },
   "monitoring_summary": {
-    "total_duration_ms": 11032,
+    "total_duration_ms": 397,
     "changed_files_count": 2,
     "added_lines_count": 6,
     "deleted_lines_count": 1,

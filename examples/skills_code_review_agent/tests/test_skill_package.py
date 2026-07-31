@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
 
 from examples.skills_code_review_agent.agent.tools import build_skill_run_payload
@@ -43,9 +42,18 @@ def test_build_skill_run_payload_points_to_skill_workspace_outputs(tmp_path: Pat
 
     assert payload["skill"] == "code-review"
     assert payload["cwd"] == "$SKILLS_DIR/code-review"
-    assert "python scripts/run_linters.py --diff-file" in payload["command"]
-    assert shlex.quote(str(diff_file)) in payload["command"]
-    assert payload["output_files"] == ["out/run_linters.json"]
+    assert payload["command"] == (
+        "python scripts/run_linters.py --diff-file work/inputs/review.diff"
+    )
+    assert str(diff_file) not in payload["command"]
+    assert payload["inputs"] == [
+        {
+            "src": f"host://{diff_file.resolve().as_posix()}",
+            "dst": "work/inputs/review.diff",
+            "mode": "copy",
+        }
+    ]
+    assert ">" not in payload["command"]
 
 
 def test_resolve_code_review_skill_dir_prefers_repository_root() -> None:
@@ -71,7 +79,7 @@ def test_build_skill_script_plan_uses_repository_root_skill_scripts(tmp_path: Pa
     assert all(invocation.script_path.is_file() for invocation in plan)
     assert all(SKILL_DIR.resolve() in invocation.script_path.resolve().parents for invocation in plan)
     assert all(invocation.command[0] == "python" for invocation in plan)
-    assert all(invocation.command[1].startswith("skills/code-review/scripts/") for invocation in plan)
+    assert all(invocation.command[1].startswith("scripts/") for invocation in plan)
     assert all(invocation.command[-1] == "work/inputs/review.diff" for invocation in plan)
 
 
