@@ -41,6 +41,8 @@ from ._session import Session
 from ._session_summarizer import SessionSummarizer
 from ._session_summarizer import SessionSummary
 
+_SUMMARY_EVENT_METADATA_KEY = "session_summary"
+
 
 _SUMMARY_EVENT_METADATA_KEY = "session_summary"
 
