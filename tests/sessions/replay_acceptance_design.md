@@ -1,28 +1,28 @@
 # Replay Consistency Design Note
 
 ## 设计说明
-本框架以统一 `ReplayCase` 协议驱动 `InMemory`、文件型 `SQLite` 与可选 `Redis` 后端，先生成 `session/state/memory/summary` 四类快照，再做归一化比较。归一化只移除非业务噪声，不掩盖事件顺序、state 最终值、memory 检索结果及 summary 归属与覆盖关系；其中普通时间戳做精度收敛，`summary_timestamp` 使用 case 级确定性时钟参与比较。summary 比较分为两层：一层比较摘要文本与压缩后的事件窗口，另一层比较 `summary_id/version/replaces/session_id` 等 lineage 元数据。为验证保存/读取语义，summary 元数据会随 summary event 一起持久化，`SQLite/Redis` 适配器在抓取快照前执行一次关服务后重开读回，并支持在 case 中显式插入中途重启步骤验证“重启后继续写”。协议支持用 `session_alias` 在同一 case 内驱动多 session / 多 user，并在最终快照中同时保留 `active session` 与 `sessions_by_alias` 视图，避免非活跃 session 损坏被漏检。memory 检索按 step 记录为独立 observation，不会在重启后被重算覆盖；同名 query 可跨 session 重复使用。负例分为 snapshot mutation 与 runtime fault 两类，二者都支持 alias 级注入，前者验证比较器精度，后者验证重复写入、中途失败、非活跃 session 污染和运行时 summary 破坏。轻量模式默认运行 `InMemory + SQLite`，集成模式通过环境变量启用 `Redis`。
+框架用统一 `ReplayCase` 驱动 InMemory、文件型 SQLite 与可选 Redis，Adapter 负责服务生命周期、持久化重启和多 session 快照；归一化、比较、allowed-diff 治理、报告和原始存储注入拆为独立模块。快照只投影业务字段并保留工具 call ID；state 字符串严格比较，memory 文本与顺序做确定性收敛。summary 同时比较文本与 `session_id/summary_id/version/replaces` lineage，后四项禁止加入白名单。allowed diff 必须有理由，可限定 backend pair，仅允许列表下标通配，每 case 最多 8 条且实际放行字段不超过 10%。公开 10 条轨迹各回放一次，先比较原始快照统计误报率，再在副本注入精确路径漂移统计检出率；SQLite/Redis 抓取前关闭并重开服务。扩展测试覆盖 runtime fault、非活跃 session、多 user、memory observation，以及绕过 SDK 直接修改 SQLite/Redis 的真实存储污染。schema v4 报告记录字段路径、两端值、定位信息、运行上下文和质量指标。
 
 ## 官方 10 条验收 Case
 | Case ID | 场景 | 验收点 |
 | --- | --- | --- |
-| `single_turn_text` | 单轮普通对话 | 基础事件一致性 |
-| `multi_turn_dialogue` | 多轮对话 | 事件顺序与多轮回放 |
-| `tool_call_and_response` | 工具调用对话 | `function_call/response` 一致性 |
-| `state_and_memory_roundtrip` | 多次 state 更新覆盖 + memory 检索 | state 覆盖语义与 memory 一致性 |
-| `summary_compaction_with_history` | summary 生成与历史事件压缩 | summary 与 historical events |
-| `summary_version_rolls_forward` | summary 更新 | version / replaces 递增 |
+| `single_turn_event_author_injection` | 单轮普通对话 | event author 漂移 |
+| `multi_turn_event_text_injection` | 多轮对话 | 指定 event index 文本漂移 |
+| `tool_call_name_injection` | 工具调用对话 | function call 名称漂移 |
+| `state_value_injection` | state 多次覆盖 | state 最终值漂移 |
+| `memory_result_loss_injection` | memory 写入和检索 | memory 结果丢失 |
+| `summary_text_injection` | summary 与事件截断 | summary 内容漂移 |
+| `summary_version_injection` | summary 更新 | version 回退 |
 | `summary_binding_mismatch_injection` | summary 归属错误 | `summary.session_id` 检出 |
 | `summary_missing_injection` | summary 丢失 | `summary` 缺失检出 |
-| `runtime_summary_overwrite_fault` | summary 覆盖错误 | `summary.replaces` 检出 |
-| `partial_failure_event_loss_fault` | 写入中途失败 | 事件窗口异常检出 |
+| `summary_lineage_corruption_injection` | summary 覆盖错误 | `summary.replaces` 检出 |
 
 ## 扩展 Case
-- `state_corruption_injection`：补充 state 字段级污染检测。
-- `summary_lineage_corruption_injection`：补充 snapshot 层 lineage 篡改。
 - `duplicate_event_runtime_fault`：补充重复写入异常。
 - `runtime_state_corruption_fault`：补充运行时 state 污染。
 - `runtime_summary_loss_fault`：补充运行时 summary 丢失。
+- `runtime_summary_overwrite_fault`：补充运行时 summary 覆盖关系污染。
+- `partial_failure_event_loss_fault`：补充中途失败导致事件丢失。
 - `non_active_session_summary_loss_fault`：补充非活跃 session 的 summary 损坏检测。
 - `cross_session_memory_aggregation`：补充同一 app/user 下跨 session 的 memory 聚合语义。
 - `restart_mid_replay_after_summary`：补充 summary 持久化后中途重启再续写的恢复语义。

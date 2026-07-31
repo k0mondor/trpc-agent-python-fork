@@ -1,0 +1,1556 @@
+{
+  "schema_version": 4,
+  "meta": {
+    "mode": "lightweight",
+    "elapsed_seconds": 4.449,
+    "backend_names": [
+      "inmemory",
+      "sqlite"
+    ],
+    "baseline_backend": "inmemory",
+    "comparison_mode": "normal_then_injected_baseline_vs_all",
+    "clock_strategy": {
+      "mode": "freshness_safe",
+      "future_skew_seconds": 60.0,
+      "freshness_safe": true
+    },
+    "acceptance_case_count": 10,
+    "extra_case_count": 10,
+    "quality_metrics": {
+      "public_case_count": 10,
+      "injection_detected_count": 10,
+      "injection_detection_rate": 1.0,
+      "injection_missed_case_ids": [],
+      "normal_passed_count": 10,
+      "normal_false_positive_count": 0,
+      "normal_false_positive_rate": 0.0,
+      "normal_false_positive_case_ids": [],
+      "summary_fault_case_count": 3,
+      "summary_fault_detected_count": 3,
+      "summary_fault_detection_rate": 1.0,
+      "summary_fault_missed_case_ids": []
+    }
+  },
+  "cases": [
+    {
+      "case_id": "single_turn_event_author_injection",
+      "description": "Single-turn replay must detect an injected event author mismatch.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "session.events[0].author"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "session.events[0].author"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "single_turn_event_author_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "session",
+              "path": "session.events[0].author",
+              "left": "user",
+              "right": "corrupted-user",
+              "allowed": false,
+              "session_id": "replay-single-turn",
+              "event_index": 0,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "multi_turn_event_text_injection",
+      "description": "Multi-turn replay must detect an injected event text mismatch at its exact index.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "session.events[2].text"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "session.events[2].text"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "multi_turn_event_text_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "session",
+              "path": "session.events[2].text",
+              "left": "Please remember my travel plan.",
+              "right": "corrupted travel plan",
+              "allowed": false,
+              "session_id": "replay-multi-turn",
+              "event_index": 2,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "tool_call_name_injection",
+      "description": "Tool replay must detect an injected function-call name mismatch.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "session.events[1].function_calls[0].name"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "session.events[1].function_calls[0].name"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "tool_call_name_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "session",
+              "path": "session.events[1].function_calls[0].name",
+              "left": "get_weather",
+              "right": "wrong_weather_tool",
+              "allowed": false,
+              "session_id": "replay-tool-call",
+              "event_index": 1,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "state_value_injection",
+      "description": "State replay must detect an injected overwritten preference.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "state.preference"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "state.preference"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "state_value_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "state",
+              "path": "state.preference",
+              "left": "green tea",
+              "right": "coffee",
+              "allowed": false,
+              "session_id": "replay-memory-state",
+              "event_index": null,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "memory_result_loss_injection",
+      "description": "Memory replay must detect an injected loss of persisted search results.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "memory.step_006:default:preference_search.entries.length"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "memory.step_006:default:preference_search.entries.length"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "memory_result_loss_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "memory",
+              "path": "memory.step_006:default:preference_search.entries.length",
+              "left": 4,
+              "right": 0,
+              "allowed": false,
+              "session_id": "replay-memory-state",
+              "event_index": null,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "summary_text_injection",
+      "description": "Summary replay must detect an injected semantic content mismatch.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary.summary_text"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary.summary_text"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "summary_text_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.summary_text",
+              "left": "deterministic-summary[user: I am planning a weekend trip. user: I am planning a weekend trip. assistant: Great, where would you like to go? assistant: Great, where would you like to go?]",
+              "right": "Unrelated corrupted summary.",
+              "allowed": false,
+              "session_id": "replay-summary-history",
+              "event_index": null,
+              "summary_id": "replay-summary-history:summary:v1",
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "summary_version_injection",
+      "description": "Summary replay must detect an injected version rollback.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary.version"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary.version"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "summary_version_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.version",
+              "left": 2,
+              "right": 1,
+              "allowed": false,
+              "session_id": "replay-summary-version",
+              "event_index": null,
+              "summary_id": "replay-summary-version:summary:v2",
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "summary_binding_mismatch_injection",
+      "description": "Injected summary ownership mismatch must be reported at the exact summary field path.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary.session_id"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary.session_id"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "summary_binding_mismatch_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.session_id",
+              "left": "replay-negative-summary-binding",
+              "right": "wrong-session-id",
+              "allowed": false,
+              "session_id": "replay-negative-summary-binding",
+              "event_index": null,
+              "summary_id": "replay-negative-summary-binding:summary:v1",
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "summary_missing_injection",
+      "description": "Injected summary loss must be detected as a summary-level mismatch.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "summary_missing_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary",
+              "left": {
+                "session_id": "replay-negative-summary-missing",
+                "summary_text": "deterministic-summary[user: Track my preferences for black coffee. user: Track my preferences for black coffee. assistant: I noted your coffee preference. assistant: I noted your coffee preference.]",
+                "original_event_count": 4,
+                "compressed_event_count": 3,
+                "summary_id": "replay-negative-summary-missing:summary:v1",
+                "version": 1,
+                "replaces": null,
+                "summarized_event_count": 2,
+                "summary_timestamp": 1785501260.981,
+                "metadata": {
+                  "replaces": null,
+                  "summarized_event_count": 2,
+                  "summary_id": "replay-negative-summary-missing:summary:v1",
+                  "version": 1
+                }
+              },
+              "right": null,
+              "allowed": false,
+              "session_id": "replay-negative-summary-missing",
+              "event_index": null,
+              "summary_id": "replay-negative-summary-missing:summary:v1",
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "summary_lineage_corruption_injection",
+      "description": "Injected summary lineage corruption must be detected via the replaces field.",
+      "scenario_type": "normal_and_injected",
+      "normal_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "injected_comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary.replaces"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary.replaces"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "summary_lineage_corruption_injection",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.replaces",
+              "left": "replay-negative-summary-lineage:summary:v1",
+              "right": "wrong-summary-id",
+              "allowed": false,
+              "session_id": "replay-negative-summary-lineage",
+              "event_index": null,
+              "summary_id": "replay-negative-summary-lineage:summary:v2",
+              "reason": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "duplicate_event_runtime_fault",
+      "description": "A duplicated event injected during replay must be detected as an event-count mismatch.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "session.events.length"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "session.events.length"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "session.events.length"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "session.events.length"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "duplicate_event_runtime_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "session",
+              "path": "session.events.length",
+              "left": 2,
+              "right": 3,
+              "allowed": false,
+              "session_id": "replay-negative-duplicate-event",
+              "event_index": null,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "duplicate_event_runtime_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "session",
+          "path": "session.events.length",
+          "left": 2,
+          "right": 3,
+          "allowed": false,
+          "session_id": "replay-negative-duplicate-event",
+          "event_index": null,
+          "summary_id": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "runtime_state_corruption_fault",
+      "description": "A runtime state corruption must be detected on the precise state path.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "state.preference"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "state.preference"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "state.preference"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "state.preference"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "runtime_state_corruption_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "state",
+              "path": "state.preference",
+              "left": "tea",
+              "right": "coffee",
+              "allowed": false,
+              "session_id": "replay-negative-runtime-state",
+              "event_index": null,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "runtime_state_corruption_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "state",
+          "path": "state.preference",
+          "left": "tea",
+          "right": "coffee",
+          "allowed": false,
+          "session_id": "replay-negative-runtime-state",
+          "event_index": null,
+          "summary_id": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "runtime_summary_loss_fault",
+      "description": "A runtime summary deletion must be detected as a missing summary.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "summary"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "summary"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "runtime_summary_loss_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary",
+              "left": {
+                "session_id": "replay-negative-runtime-summary-loss",
+                "summary_text": "deterministic-summary[user: Please summarize my sprint notes. user: Please summarize my sprint notes. assistant: Sure, continue. assistant: Sure, continue.]",
+                "original_event_count": 4,
+                "compressed_event_count": 3,
+                "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+                "version": 1,
+                "replaces": null,
+                "summarized_event_count": 2,
+                "summary_timestamp": 1785501261.357,
+                "metadata": {
+                  "replaces": null,
+                  "summarized_event_count": 2,
+                  "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+                  "version": 1
+                }
+              },
+              "right": null,
+              "allowed": false,
+              "session_id": "replay-negative-runtime-summary-loss",
+              "event_index": null,
+              "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "runtime_summary_loss_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "summary",
+          "path": "summary",
+          "left": {
+            "session_id": "replay-negative-runtime-summary-loss",
+            "summary_text": "deterministic-summary[user: Please summarize my sprint notes. user: Please summarize my sprint notes. assistant: Sure, continue. assistant: Sure, continue.]",
+            "original_event_count": 4,
+            "compressed_event_count": 3,
+            "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+            "version": 1,
+            "replaces": null,
+            "summarized_event_count": 2,
+            "summary_timestamp": 1785501261.357,
+            "metadata": {
+              "replaces": null,
+              "summarized_event_count": 2,
+              "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+              "version": 1
+            }
+          },
+          "right": null,
+          "allowed": false,
+          "session_id": "replay-negative-runtime-summary-loss",
+          "event_index": null,
+          "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "runtime_summary_overwrite_fault",
+      "description": "A runtime summary overwrite must be detected through lineage replacement fields.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "summary.metadata.replaces",
+        "summary.replaces"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "summary.metadata.replaces",
+        "summary.replaces"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "summary.metadata.replaces",
+            "summary.replaces"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "summary.metadata.replaces",
+            "summary.replaces"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "runtime_summary_overwrite_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.metadata.replaces",
+              "left": "replay-negative-runtime-summary-overwrite:summary:v1",
+              "right": "wrong-summary-id",
+              "allowed": false,
+              "session_id": "replay-negative-runtime-summary-overwrite",
+              "event_index": null,
+              "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
+              "reason": null
+            },
+            {
+              "case_id": "runtime_summary_overwrite_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "summary",
+              "path": "summary.replaces",
+              "left": "replay-negative-runtime-summary-overwrite:summary:v1",
+              "right": "wrong-summary-id",
+              "allowed": false,
+              "session_id": "replay-negative-runtime-summary-overwrite",
+              "event_index": null,
+              "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "runtime_summary_overwrite_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "summary",
+          "path": "summary.metadata.replaces",
+          "left": "replay-negative-runtime-summary-overwrite:summary:v1",
+          "right": "wrong-summary-id",
+          "allowed": false,
+          "session_id": "replay-negative-runtime-summary-overwrite",
+          "event_index": null,
+          "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
+          "reason": null
+        },
+        {
+          "case_id": "runtime_summary_overwrite_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "summary",
+          "path": "summary.replaces",
+          "left": "replay-negative-runtime-summary-overwrite:summary:v1",
+          "right": "wrong-summary-id",
+          "allowed": false,
+          "session_id": "replay-negative-runtime-summary-overwrite",
+          "event_index": null,
+          "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "partial_failure_event_loss_fault",
+      "description": "A partial failure that loses the final event but keeps state must be detected as an event-window mismatch.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "session.events.length"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "session.events.length"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "session.events.length"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "session.events.length"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "partial_failure_event_loss_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "session",
+              "path": "session.events.length",
+              "left": 2,
+              "right": 1,
+              "allowed": false,
+              "session_id": "replay-negative-partial-failure",
+              "event_index": null,
+              "summary_id": null,
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "partial_failure_event_loss_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "session",
+          "path": "session.events.length",
+          "left": 2,
+          "right": 1,
+          "allowed": false,
+          "session_id": "replay-negative-partial-failure",
+          "event_index": null,
+          "summary_id": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "non_active_session_summary_loss_fault",
+      "description": "A runtime summary deletion on a non-active session alias must still be detected through alias-scoped snapshots.",
+      "scenario_type": "extended",
+      "expects_diffs": true,
+      "expected_diff_paths": [
+        "sessions_by_alias.source.summary"
+      ],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [
+        "sessions_by_alias.source.summary"
+      ],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [
+            "sessions_by_alias.source.summary"
+          ],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [
+            "sessions_by_alias.source.summary"
+          ],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": [
+            {
+              "case_id": "non_active_session_summary_loss_fault",
+              "backend_a": "inmemory",
+              "backend_b": "sqlite",
+              "scope": "sessions_by_alias",
+              "path": "sessions_by_alias.source.summary",
+              "left": {
+                "session_id": "replay-negative-source-session",
+                "summary_text": "deterministic-summary[user: Please summarize my architecture notes. user: Please summarize my architecture notes. assistant: Sure, continue with the details. assistant: Sure, continue with the details.]",
+                "original_event_count": 4,
+                "compressed_event_count": 3,
+                "summary_id": "replay-negative-source-session:summary:v1",
+                "version": 1,
+                "replaces": null,
+                "summarized_event_count": 2,
+                "summary_timestamp": 1785501262.16,
+                "metadata": {
+                  "replaces": null,
+                  "summarized_event_count": 2,
+                  "summary_id": "replay-negative-source-session:summary:v1",
+                  "version": 1
+                }
+              },
+              "right": null,
+              "allowed": false,
+              "session_id": "replay-negative-source-session",
+              "event_index": null,
+              "summary_id": "replay-negative-source-session:summary:v1",
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "diffs": [
+        {
+          "case_id": "non_active_session_summary_loss_fault",
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "scope": "sessions_by_alias",
+          "path": "sessions_by_alias.source.summary",
+          "left": {
+            "session_id": "replay-negative-source-session",
+            "summary_text": "deterministic-summary[user: Please summarize my architecture notes. user: Please summarize my architecture notes. assistant: Sure, continue with the details. assistant: Sure, continue with the details.]",
+            "original_event_count": 4,
+            "compressed_event_count": 3,
+            "summary_id": "replay-negative-source-session:summary:v1",
+            "version": 1,
+            "replaces": null,
+            "summarized_event_count": 2,
+            "summary_timestamp": 1785501262.16,
+            "metadata": {
+              "replaces": null,
+              "summarized_event_count": 2,
+              "summary_id": "replay-negative-source-session:summary:v1",
+              "version": 1
+            }
+          },
+          "right": null,
+          "allowed": false,
+          "session_id": "replay-negative-source-session",
+          "event_index": null,
+          "summary_id": "replay-negative-source-session:summary:v1",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "case_id": "cross_session_memory_aggregation",
+      "description": "Memory written by one session should remain searchable from another session under the same app/user scope.",
+      "scenario_type": "extended",
+      "expects_diffs": false,
+      "expected_diff_paths": [],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "diffs": []
+    },
+    {
+      "case_id": "restart_mid_replay_after_summary",
+      "description": "Persistent backends should restore summary state correctly after a restart and continue replaying later turns.",
+      "scenario_type": "extended",
+      "expects_diffs": false,
+      "expected_diff_paths": [],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "diffs": []
+    },
+    {
+      "case_id": "state_namespace_roundtrip",
+      "description": "App, user, session, and temp state should preserve their intended visibility across sessions and restarts.",
+      "scenario_type": "extended",
+      "expects_diffs": false,
+      "expected_diff_paths": [],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "diffs": []
+    },
+    {
+      "case_id": "cross_user_memory_isolation",
+      "description": "Memory saved for one user must not become visible to another user in the same application.",
+      "scenario_type": "extended",
+      "expects_diffs": false,
+      "expected_diff_paths": [],
+      "allowed_diff_paths": [],
+      "detected_diff_paths": [],
+      "missing_expected_paths": [],
+      "unexpected_diff_paths": [],
+      "comparison_count": 1,
+      "comparisons": [
+        {
+          "backend_a": "inmemory",
+          "backend_b": "sqlite",
+          "expected_diff_paths": [],
+          "allowed_diff_paths": [],
+          "detected_diff_paths": [],
+          "missing_expected_paths": [],
+          "unexpected_diff_paths": [],
+          "runtime_context": {
+            "inmemory": {
+              "backend_name": "inmemory",
+              "storage_kind": "inmemory"
+            },
+            "sqlite": {
+              "backend_name": "sqlite",
+              "storage_kind": "sqlite",
+              "connection": {
+                "scheme": "sqlite",
+                "session_db": "sessions.sqlite",
+                "memory_db": "memory.sqlite"
+              }
+            }
+          },
+          "diffs": []
+        }
+      ],
+      "diffs": []
+    }
+  ]
+}

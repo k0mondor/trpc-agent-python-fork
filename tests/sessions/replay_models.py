@@ -168,6 +168,15 @@ class ReplayStep:
 
 
 @dataclass(frozen=True)
+class AllowedDiffSpec:
+    """Declarative allowlist entry carried by a replay case."""
+
+    path: str
+    reason: str
+    backend_pair: Optional[tuple[str, str]] = None
+
+
+@dataclass(frozen=True)
 class ReplayCase:
     """A deterministic replay scenario."""
 
@@ -180,7 +189,10 @@ class ReplayCase:
     summary_keep_recent_count: int = 2
     store_historical_events: bool = False
     steps: tuple[ReplayStep, ...] = field(default_factory=tuple)
+    allowed_diff_rules: tuple[AllowedDiffSpec, ...] = field(default_factory=tuple)
     allowed_diff_paths: tuple[str, ...] = field(default_factory=tuple)
+    allowed_diff_reasons: dict[str, str] = field(default_factory=dict)
+    allowed_diff_backend_pairs: dict[str, tuple[str, str]] = field(default_factory=dict)
     expected_diff_paths: tuple[str, ...] = field(default_factory=tuple)
     snapshot_mutations: tuple["SnapshotMutation", ...] = field(default_factory=tuple)
     runtime_faults: tuple["RuntimeFault", ...] = field(default_factory=tuple)

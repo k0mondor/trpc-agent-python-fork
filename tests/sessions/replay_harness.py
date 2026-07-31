@@ -21,8 +21,6 @@ from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
-import json
-import re
 import tempfile
 import time
 import uuid
@@ -49,7 +47,6 @@ from trpc_agent_sdk.sessions import SessionServiceConfig
 from trpc_agent_sdk.sessions import SqlSessionService
 
 from .replay_models import BackendSnapshot
-from .replay_models import DiffEntry
 from .replay_models import EventSpec
 from .replay_models import FunctionCallSpec
 from .replay_models import FunctionResponseSpec
@@ -60,19 +57,16 @@ from .replay_models import ReplayStepKind
 from .replay_models import RuntimeFault
 from .replay_models import RuntimeFaultOperation
 from .replay_models import SessionSnapshot
-from .replay_models import SnapshotMutation
-from .replay_models import SnapshotMutationOperation
 from .replay_models import SummarySnapshot
 from .replay_summary import build_replay_summarizer_manager
+from .replay.comparator import backend_target_matches as _backend_target_matches
+from .replay.comparator import set_path_value as _set_path_value
+from .replay.normalizer import normalize_scalar as _normalize_scalar
 
 
 DEFAULT_REPORT_PATH = Path(__file__).with_name("session_memory_summary_diff_report.json")
-_EVENT_INDEX_RE = re.compile(r"\[(\d+)\]")
 _SUMMARY_EVENT_METADATA_KEY = "session_summary"
 _CASE_TIME_BASES: dict[str, float] = {}
-_BASELINE_BACKEND_NAME = "inmemory"
-_PERSISTENT_BACKEND_TARGETS = {"persistent", "secondary", "non_baseline"}
-_BASELINE_BACKEND_TARGETS = {"baseline", "primary", "inmemory"}
 _CASE_TIME_FUTURE_SKEW_SECONDS = 60.0
 _REPLAY_CLOCK_MODE_ENV = "TRPC_AGENT_REPLAY_CLOCK_MODE"
 _REPLAY_FIXED_EPOCH_ENV = "TRPC_AGENT_REPLAY_FIXED_EPOCH"
@@ -220,6 +214,25 @@ class ReplayBackendAdapter(ABC):
             self._session = self._sessions[self._active_session_alias]
         if self._session is None:
             return
+
+    async def restart_services(self) -> None:
+        """Public persistence boundary used by end-to-end corruption tests."""
+
+        await self._restart_services()
+
+    async def read_persisted_snapshot(self) -> BackendSnapshot:
+        """Restart the backend and collect a fresh persistence-backed snapshot."""
+
+        await self.restart_services()
+        return await self.collect_snapshot(self.case)
+
+    def storage_identity(self, session_alias: str = "default") -> dict[str, str]:
+        """Return the physical backend identity for a logical session alias."""
+
+        identity = self._session_identities.get(session_alias)
+        if identity is None:
+            raise KeyError(f"Unknown replay session alias: {session_alias}")
+        return dict(identity)
 
     def should_restart_during_replay(self) -> bool:
         """Return whether RESTART_SERVICES steps should perform a real restart."""
@@ -527,6 +540,12 @@ class SqliteReplayAdapter(ReplayBackendAdapter):
     def _sqlite_url(self, filename: str) -> str:
         return f"sqlite:///{(Path(self._temp_dir.name) / filename).as_posix()}"
 
+    @property
+    def session_db_url(self) -> str:
+        """Expose the ephemeral session store to raw-corruption tests."""
+
+        return self._session_db_url
+
     def should_restart_before_snapshot(self) -> bool:
         return True
 
@@ -593,6 +612,10 @@ class RedisReplayAdapter(ReplayBackendAdapter):
             raise RuntimeError("Logical replay case is not initialized.")
         return self._logical_case
 
+    @property
+    def redis_url(self) -> str:
+        return self._redis_url
+
     async def setup(self, case: ReplayCase) -> None:
         self._logical_case = case
         self._logical_session_identities = _collect_logical_session_identities(case)
@@ -605,7 +628,12 @@ class RedisReplayAdapter(ReplayBackendAdapter):
         return True
 
     async def run_case(self, case: ReplayCase) -> BackendSnapshot:
-        snapshot = await super().run_case(self.case)
+        return self._project_snapshot(await super().run_case(self.case))
+
+    async def read_persisted_snapshot(self) -> BackendSnapshot:
+        return self._project_snapshot(await super().read_persisted_snapshot())
+
+    def _project_snapshot(self, snapshot: BackendSnapshot) -> BackendSnapshot:
         sessions_by_alias = {
             alias: self._project_session_snapshot(alias, session_snapshot)
             for alias, session_snapshot in snapshot.sessions_by_alias.items()
@@ -812,6 +840,7 @@ def _event_to_snapshot(event: Event) -> dict[str, Any]:
         "state_delta": dict(event.actions.state_delta or {}),
         "function_calls": [
             {
+                "call_id": call.id,
                 "name": call.name,
                 "args": _normalize_scalar(call.args),
             }
@@ -819,6 +848,7 @@ def _event_to_snapshot(event: Event) -> dict[str, Any]:
         ],
         "function_responses": [
             {
+                "call_id": response.id,
                 "name": response.name,
                 "response": _normalize_scalar(response.response),
             }
@@ -837,111 +867,6 @@ def _memory_entry_to_snapshot(entry: Any) -> dict[str, Any]:
         "text": text,
         "timestamp": getattr(entry, "timestamp", None),
     }
-
-
-def normalize_backend_snapshot(snapshot: BackendSnapshot) -> dict[str, Any]:
-    """Normalize backend noise before diffing."""
-
-    return {
-        "backend_name": snapshot.backend_name,
-        "case_id": snapshot.case_id,
-        "app_name": snapshot.app_name,
-        "user_id": snapshot.user_id,
-        "session_id": snapshot.session_id,
-        "active_session_alias": snapshot.active_session_alias,
-        "session": _normalize_scalar(snapshot.session),
-        "state": _normalize_scalar(snapshot.state),
-        "memory": _normalize_memory(snapshot.memory),
-        "summary": _normalize_summary(snapshot.summary),
-        "sessions_by_alias": _normalize_sessions_by_alias(snapshot.sessions_by_alias, snapshot.active_session_alias),
-    }
-
-
-def _normalize_summary(summary: Optional[SummarySnapshot]) -> Optional[dict[str, Any]]:
-    if summary is None:
-        return None
-    return {
-        "session_id": summary.session_id,
-        "summary_text": summary.summary_text.strip(),
-        "original_event_count": summary.original_event_count,
-        "compressed_event_count": summary.compressed_event_count,
-        "summary_id": summary.summary_id,
-        "version": summary.version,
-        "replaces": summary.replaces,
-        "summarized_event_count": summary.summarized_event_count,
-        "summary_timestamp": _normalize_timestamp(summary.summary_timestamp),
-        "metadata": _normalize_scalar(summary.metadata),
-    }
-
-
-def _normalize_memory(memory_results: dict[str, Any]) -> dict[str, Any]:
-    normalized: dict[str, Any] = {}
-    for observation_key, observation in memory_results.items():
-        if isinstance(observation, dict):
-            entries = observation.get("entries", [])
-            normalized_observation = {
-                "query_name": observation.get("query_name"),
-                "session_alias": observation.get("session_alias"),
-                "app_name": observation.get("app_name"),
-                "user_id": observation.get("user_id"),
-                "session_id": observation.get("session_id"),
-                "step_index": observation.get("step_index"),
-            }
-        else:
-            entries = observation
-            normalized_observation = {}
-        normalized_entries = []
-        for entry in entries:
-            normalized_entries.append(
-                {
-                    "author": entry.get("author"),
-                    "role": entry.get("role"),
-                    "text": (entry.get("text") or "").strip(),
-                })
-        normalized_observation["entries"] = sorted(
-            normalized_entries,
-            key=lambda item: (item["text"], item["author"] or "", item["role"] or ""),
-        )
-        normalized[observation_key] = _normalize_scalar(normalized_observation)
-    return normalized
-
-
-def _normalize_sessions_by_alias(
-    sessions_by_alias: dict[str, SessionSnapshot],
-    active_session_alias: str,
-) -> dict[str, Any]:
-    normalized: dict[str, Any] = {}
-    for session_alias, snapshot in sessions_by_alias.items():
-        if session_alias == active_session_alias:
-            continue
-        normalized[session_alias] = {
-            "session_alias": snapshot.session_alias,
-            "app_name": snapshot.app_name,
-            "user_id": snapshot.user_id,
-            "session_id": snapshot.session_id,
-            "session": _normalize_scalar(snapshot.session),
-            "state": _normalize_scalar(snapshot.state),
-            "summary": _normalize_summary(snapshot.summary),
-        }
-    return normalized
-
-
-def _normalize_scalar(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _normalize_scalar(value[key]) for key in sorted(value)}
-    if isinstance(value, list):
-        return [_normalize_scalar(item) for item in value]
-    if isinstance(value, tuple):
-        return [_normalize_scalar(item) for item in value]
-    if isinstance(value, str):
-        return value.strip()
-    return value
-
-
-def _normalize_timestamp(value: Optional[float]) -> Optional[float]:
-    if value is None:
-        return None
-    return round(float(value), 6)
 
 
 def get_replay_clock_metadata() -> dict[str, Any]:
@@ -997,300 +922,6 @@ def _collect_logical_session_identities(case: ReplayCase) -> dict[str, dict[str,
     return identities
 
 
-def _backend_target_matches(target_name: str, backend_name: str) -> bool:
-    normalized_target = target_name.strip().lower()
-    normalized_backend = backend_name.strip().lower()
-    if normalized_target == normalized_backend:
-        return True
-    if normalized_target in _PERSISTENT_BACKEND_TARGETS:
-        return normalized_backend != _BASELINE_BACKEND_NAME
-    if normalized_target in _BASELINE_BACKEND_TARGETS:
-        return normalized_backend == _BASELINE_BACKEND_NAME
-    return False
-
-
-def expected_diff_paths_for_backend_pair(
-    case: ReplayCase,
-    *,
-    backend_a: str,
-    backend_b: str,
-) -> tuple[str, ...]:
-    if not case.expected_diff_paths:
-        return ()
-
-    for target_name in [mutation.backend_name for mutation in case.snapshot_mutations] + [
-        fault.backend_name for fault in case.runtime_faults
-    ]:
-        if _backend_target_matches(target_name, backend_a) or _backend_target_matches(target_name, backend_b):
-            return case.expected_diff_paths
-    return ()
-
-
-def diff_backend_snapshots(
-    *,
-    case: ReplayCase,
-    left: BackendSnapshot,
-    right: BackendSnapshot,
-) -> list[DiffEntry]:
-    """Generate structured diffs for two snapshots."""
-
-    left_view = normalize_backend_snapshot(left)
-    right_view = normalize_backend_snapshot(right)
-    _apply_snapshot_mutations(left_view, case.snapshot_mutations, left.backend_name)
-    _apply_snapshot_mutations(right_view, case.snapshot_mutations, right.backend_name)
-    diffs: list[DiffEntry] = []
-
-    for scope in ("session", "state", "memory", "summary"):
-        scope_summary_id = _resolve_summary_id(left_view.get(scope), right_view.get(scope)) if scope == "summary" else None
-        _diff_values(
-            case=case,
-            backend_a=left.backend_name,
-            backend_b=right.backend_name,
-            scope=scope,
-            path=scope,
-            left=left_view[scope],
-            right=right_view[scope],
-            out=diffs,
-            session_id=_resolve_session_id(left_view, right_view, case.session_id),
-            summary_id=scope_summary_id,
-        )
-    left_aliases = left_view.get("sessions_by_alias", {})
-    right_aliases = right_view.get("sessions_by_alias", {})
-    for session_alias in sorted(set(left_aliases) | set(right_aliases)):
-        left_alias_snapshot = left_aliases.get(session_alias)
-        right_alias_snapshot = right_aliases.get(session_alias)
-        _diff_values(
-            case=case,
-            backend_a=left.backend_name,
-            backend_b=right.backend_name,
-            scope="sessions_by_alias",
-            path=f"sessions_by_alias.{session_alias}",
-            left=left_alias_snapshot,
-            right=right_alias_snapshot,
-            out=diffs,
-            session_id=_resolve_value_session_id(left_alias_snapshot, right_alias_snapshot, case.session_id),
-            summary_id=_resolve_summary_id(
-                left_alias_snapshot.get("summary") if isinstance(left_alias_snapshot, dict) else None,
-                right_alias_snapshot.get("summary") if isinstance(right_alias_snapshot, dict) else None,
-            ),
-        )
-    return diffs
-
-
-def _apply_snapshot_mutations(
-    snapshot_view: dict[str, Any],
-    mutations: tuple[SnapshotMutation, ...],
-    backend_name: str,
-) -> None:
-    for mutation in mutations:
-        if not _backend_target_matches(mutation.backend_name, backend_name):
-            continue
-        _apply_snapshot_mutation(snapshot_view, mutation)
-
-
-def _apply_snapshot_mutation(snapshot_view: dict[str, Any], mutation: SnapshotMutation) -> None:
-    tokens = _parse_path_tokens(mutation.path)
-    if not tokens:
-        raise ValueError(f"Invalid mutation path: {mutation.path}")
-
-    parent, last_token = _resolve_parent(snapshot_view, tokens)
-    if mutation.operation == SnapshotMutationOperation.SET:
-        _set_token(parent, last_token, mutation.value)
-        return
-    if mutation.operation == SnapshotMutationOperation.DELETE:
-        _delete_token(parent, last_token)
-        return
-    raise ValueError(f"Unsupported snapshot mutation operation: {mutation.operation}")
-
-
-def _parse_path_tokens(path: str) -> list[Any]:
-    tokens: list[Any] = []
-    for part in path.split("."):
-        if not part:
-            continue
-        cursor = part
-        while cursor:
-            match = re.match(r"^([^\[]+)(\[(\d+)\])?(.*)$", cursor)
-            if not match:
-                raise ValueError(f"Invalid path segment: {cursor}")
-            key, _, index, rest = match.groups()
-            if key:
-                tokens.append(key)
-            if index is not None:
-                tokens.append(int(index))
-            cursor = rest
-    return tokens
-
-
-def _resolve_parent(root: dict[str, Any], tokens: list[Any]) -> tuple[Any, Any]:
-    target = root
-    for token in tokens[:-1]:
-        target = _get_token(target, token)
-    return target, tokens[-1]
-
-
-def _set_token(container: Any, token: Any, value: Any) -> None:
-    if isinstance(token, int):
-        container[token] = value
-    elif isinstance(container, dict):
-        container[token] = value
-    else:
-        setattr(container, token, value)
-
-
-def _delete_token(container: Any, token: Any) -> None:
-    if isinstance(token, int):
-        del container[token]
-    elif isinstance(container, dict):
-        container.pop(token, None)
-    else:
-        delattr(container, token)
-
-
-def _get_token(container: Any, token: Any) -> Any:
-    if isinstance(token, int):
-        return container[token]
-    if isinstance(container, dict):
-        return container[token]
-    return getattr(container, token)
-
-
-def _set_path_value(root: Any, path: str, value: Any) -> None:
-    tokens = _parse_path_tokens(path)
-    if not tokens:
-        raise ValueError(f"Invalid mutation path: {path}")
-    parent, last_token = _resolve_parent(root, tokens)
-    _set_token(parent, last_token, value)
-
-
-def _diff_values(
-    *,
-    case: ReplayCase,
-    backend_a: str,
-    backend_b: str,
-    scope: str,
-    path: str,
-    left: Any,
-    right: Any,
-    out: list[DiffEntry],
-    session_id: str,
-    summary_id: Optional[str],
-) -> None:
-    if type(left) is not type(right):
-        out.append(_make_diff(case, backend_a, backend_b, scope, path, left, right, session_id, summary_id))
-        return
-
-    if isinstance(left, dict):
-        for key in sorted(set(left) | set(right)):
-            next_path = f"{path}.{key}"
-            if key not in left or key not in right:
-                out.append(
-                    _make_diff(
-                        case,
-                        backend_a,
-                        backend_b,
-                        scope,
-                        next_path,
-                        left.get(key),
-                        right.get(key),
-                        session_id,
-                    summary_id,
-                    ))
-                continue
-            _diff_values(
-                case=case,
-                backend_a=backend_a,
-                backend_b=backend_b,
-                scope=scope,
-                path=next_path,
-                left=left[key],
-                right=right[key],
-                out=out,
-                session_id=session_id,
-                summary_id=summary_id,
-            )
-        return
-
-    if isinstance(left, list):
-        if len(left) != len(right):
-            out.append(_make_diff(case, backend_a, backend_b, scope, f"{path}.length", len(left), len(right),
-                                  session_id, summary_id))
-            return
-        for index, (left_item, right_item) in enumerate(zip(left, right)):
-            _diff_values(
-                case=case,
-                backend_a=backend_a,
-                backend_b=backend_b,
-                scope=scope,
-                path=f"{path}[{index}]",
-                left=left_item,
-                right=right_item,
-                out=out,
-                session_id=session_id,
-                summary_id=summary_id,
-            )
-        return
-
-    if left != right:
-        out.append(_make_diff(case, backend_a, backend_b, scope, path, left, right, session_id, summary_id))
-
-
-def _make_diff(
-    case: ReplayCase,
-    backend_a: str,
-    backend_b: str,
-    scope: str,
-    path: str,
-    left: Any,
-    right: Any,
-    session_id: str,
-    summary_id: Optional[str],
-) -> DiffEntry:
-    allowed = path in set(case.allowed_diff_paths)
-    event_index = _extract_event_index(path)
-    reason = "Allowed backend-specific difference." if allowed else None
-    return DiffEntry(
-        case_id=case.case_id,
-        backend_a=backend_a,
-        backend_b=backend_b,
-        scope=scope,
-        path=path,
-        left=left,
-        right=right,
-        allowed=allowed,
-        session_id=session_id,
-        event_index=event_index,
-        summary_id=summary_id,
-        reason=reason,
-    )
-
-
-def _resolve_summary_id(left: Any, right: Any) -> Optional[str]:
-    for value in (left, right):
-        if isinstance(value, dict):
-            summary_id = value.get("summary_id")
-            if summary_id is not None:
-                return str(summary_id)
-    return None
-
-
-def _resolve_session_id(left: dict[str, Any], right: dict[str, Any], fallback: str) -> str:
-    left_session_id = left.get("session_id")
-    right_session_id = right.get("session_id")
-    if isinstance(left_session_id, str) and left_session_id == right_session_id:
-        return left_session_id
-    return fallback
-
-
-def _resolve_value_session_id(left: Any, right: Any, fallback: str) -> str:
-    for value in (left, right):
-        if isinstance(value, dict):
-            session_id = value.get("session_id")
-            if isinstance(session_id, str):
-                return session_id
-    return fallback
-
-
 def _deterministic_time_base(case_id: str) -> float:
     if case_id not in _CASE_TIME_BASES:
         digest = hashlib.sha1(case_id.encode("utf-8")).digest()
@@ -1319,107 +950,3 @@ def _get_summary_event(session: Session) -> Optional[Event]:
         if event.is_summary_event():
             return event
     return None
-
-
-def _extract_event_index(path: str) -> Optional[int]:
-    match = _EVENT_INDEX_RE.search(path)
-    if not match:
-        return None
-    return int(match.group(1))
-
-
-def format_diffs(diffs: list[DiffEntry]) -> str:
-    """Render human-readable diffs for assertion failures."""
-
-    if not diffs:
-        return "No differences detected."
-    lines = []
-    for diff in diffs:
-        prefix = "ALLOWED" if diff.allowed else "DIFF"
-        lines.append(f"{prefix} {diff.path}: {diff.left!r} != {diff.right!r}")
-    return "\n".join(lines)
-
-
-def build_case_report(case: ReplayCase, diffs: list[DiffEntry]) -> dict[str, Any]:
-    """Build a grouped report for one replay case."""
-
-    expected_paths = set(case.expected_diff_paths)
-    allowed_paths = set(case.allowed_diff_paths)
-    detected_paths = {diff.path for diff in diffs if not diff.allowed}
-    return {
-        "case_id": case.case_id,
-        "description": case.description,
-        "expects_diffs": bool(expected_paths),
-        "expected_diff_paths": sorted(expected_paths),
-        "allowed_diff_paths": sorted(allowed_paths),
-        "detected_diff_paths": sorted(detected_paths),
-        "missing_expected_paths": sorted(expected_paths - detected_paths),
-        "unexpected_diff_paths": sorted(detected_paths - expected_paths),
-        "diffs": [diff.to_dict() for diff in diffs],
-    }
-
-
-def build_comparison_report(
-    case: ReplayCase,
-    *,
-    backend_a: str,
-    backend_b: str,
-    diffs: list[DiffEntry],
-    runtime_context: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    expected_paths = set(expected_diff_paths_for_backend_pair(case, backend_a=backend_a, backend_b=backend_b))
-    allowed_paths = set(case.allowed_diff_paths)
-    detected_paths = {diff.path for diff in diffs if not diff.allowed}
-    return {
-        "backend_a": backend_a,
-        "backend_b": backend_b,
-        "expected_diff_paths": sorted(expected_paths),
-        "allowed_diff_paths": sorted(allowed_paths),
-        "detected_diff_paths": sorted(detected_paths),
-        "missing_expected_paths": sorted(expected_paths - detected_paths),
-        "unexpected_diff_paths": sorted(detected_paths - expected_paths),
-        "runtime_context": runtime_context or {},
-        "diffs": [diff.to_dict() for diff in diffs],
-    }
-
-
-def build_case_matrix_report(case: ReplayCase, comparisons: list[dict[str, Any]]) -> dict[str, Any]:
-    expected_paths = set(case.expected_diff_paths)
-    allowed_paths = set(case.allowed_diff_paths)
-    detected_paths = {
-        path
-        for comparison in comparisons
-        for path in comparison.get("detected_diff_paths", [])
-    }
-    all_diffs = [
-        diff
-        for comparison in comparisons
-        for diff in comparison.get("diffs", [])
-    ]
-    return {
-        "case_id": case.case_id,
-        "description": case.description,
-        "expects_diffs": bool(expected_paths),
-        "expected_diff_paths": sorted(expected_paths),
-        "allowed_diff_paths": sorted(allowed_paths),
-        "detected_diff_paths": sorted(detected_paths),
-        "missing_expected_paths": sorted(expected_paths - detected_paths),
-        "unexpected_diff_paths": sorted(detected_paths - expected_paths),
-        "comparison_count": len(comparisons),
-        "comparisons": comparisons,
-        "diffs": all_diffs,
-    }
-
-
-def write_diff_report(
-    report_path: Path,
-    case_reports: list[dict[str, Any]],
-    metadata: Optional[dict[str, Any]] = None,
-) -> None:
-    """Write grouped replay reports to JSON."""
-
-    payload = {
-        "meta": metadata or {},
-        "cases": case_reports,
-    }
-    report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

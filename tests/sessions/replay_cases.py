@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .replay_models import EventSpec
 from .replay_models import FunctionCallSpec
 from .replay_models import FunctionResponseSpec
@@ -705,30 +707,111 @@ _ROBUSTNESS_CASES: tuple[ReplayCase, ...] = (
 )
 
 
-# The acceptance suite is the public, fixed set of 10 replay cases used to
-# demonstrate baseline correctness and inconsistency detection.
+def _with_snapshot_injection(
+    case: ReplayCase,
+    *,
+    case_id: str,
+    description: str,
+    mutation_path: str,
+    expected_path: str,
+    value: object = None,
+    operation: SnapshotMutationOperation = SnapshotMutationOperation.SET,
+) -> ReplayCase:
+    """Attach one independently declared comparator injection to a clean trajectory."""
+
+    return replace(
+        case,
+        case_id=case_id,
+        description=description,
+        expected_diff_paths=(expected_path,),
+        snapshot_mutations=(
+            SnapshotMutation(
+                backend_name=_PERSISTENT_BACKEND,
+                path=mutation_path,
+                operation=operation,
+                value=value,
+            ),
+        ),
+        runtime_faults=(),
+    )
+
+
+# The public acceptance suite contains 10 clean trajectories plus one explicit
+# snapshot injection plan per trajectory. Tests first compare the unmodified
+# snapshots (false-positive measurement), then apply the declared injection to
+# the same snapshots (detection measurement), so no second backend replay is
+# required.
 REPLAY_ACCEPTANCE_CASES: tuple[ReplayCase, ...] = (
-    _BASELINE_CASES[0],  # single_turn_text
-    _BASELINE_CASES[1],  # multi_turn_dialogue
-    _BASELINE_CASES[2],  # tool_call_and_response
-    _BASELINE_CASES[3],  # state_and_memory_roundtrip
-    _BASELINE_CASES[4],  # summary_compaction_with_history
-    _BASELINE_CASES[5],  # summary_version_rolls_forward
+    _with_snapshot_injection(
+        _BASELINE_CASES[0],
+        case_id="single_turn_event_author_injection",
+        description="Single-turn replay must detect an injected event author mismatch.",
+        mutation_path="session.events[0].author",
+        expected_path="session.events[0].author",
+        value="corrupted-user",
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[1],
+        case_id="multi_turn_event_text_injection",
+        description="Multi-turn replay must detect an injected event text mismatch at its exact index.",
+        mutation_path="session.events[2].text",
+        expected_path="session.events[2].text",
+        value="corrupted travel plan",
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[2],
+        case_id="tool_call_name_injection",
+        description="Tool replay must detect an injected function-call name mismatch.",
+        mutation_path="session.events[1].function_calls[0].name",
+        expected_path="session.events[1].function_calls[0].name",
+        value="wrong_weather_tool",
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[3],
+        case_id="state_value_injection",
+        description="State replay must detect an injected overwritten preference.",
+        mutation_path="state.preference",
+        expected_path="state.preference",
+        value="coffee",
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[3],
+        case_id="memory_result_loss_injection",
+        description="Memory replay must detect an injected loss of persisted search results.",
+        mutation_path="memory.step_006:default:preference_search.entries",
+        expected_path="memory.step_006:default:preference_search.entries.length",
+        value=[],
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[4],
+        case_id="summary_text_injection",
+        description="Summary replay must detect an injected semantic content mismatch.",
+        mutation_path="summary.summary_text",
+        expected_path="summary.summary_text",
+        value="Unrelated corrupted summary.",
+    ),
+    _with_snapshot_injection(
+        _BASELINE_CASES[5],
+        case_id="summary_version_injection",
+        description="Summary replay must detect an injected version rollback.",
+        mutation_path="summary.version",
+        expected_path="summary.version",
+        value=1,
+    ),
     _NEGATIVE_CASES[0],  # summary_binding_mismatch_injection
     _NEGATIVE_CASES[1],  # summary_missing_injection
-    _NEGATIVE_CASES[7],  # runtime_summary_overwrite_fault
-    _NEGATIVE_CASES[8],  # partial_failure_event_loss_fault
+    _NEGATIVE_CASES[3],  # summary_lineage_corruption_injection
 )
 
 
 # Extra cases extend coverage beyond the fixed acceptance set while reusing the
 # same harness and reporting pipeline.
 REPLAY_EXTRA_CASES: tuple[ReplayCase, ...] = (
-    _NEGATIVE_CASES[2],  # state_corruption_injection
-    _NEGATIVE_CASES[3],  # summary_lineage_corruption_injection
     _NEGATIVE_CASES[4],  # duplicate_event_runtime_fault
     _NEGATIVE_CASES[5],  # runtime_state_corruption_fault
     _NEGATIVE_CASES[6],  # runtime_summary_loss_fault
+    _NEGATIVE_CASES[7],  # runtime_summary_overwrite_fault
+    _NEGATIVE_CASES[8],  # partial_failure_event_loss_fault
     _NEGATIVE_CASES[9],  # non_active_session_summary_loss_fault
     _ROBUSTNESS_CASES[0],  # cross_session_memory_aggregation
     _ROBUSTNESS_CASES[1],  # restart_mid_replay_after_summary
