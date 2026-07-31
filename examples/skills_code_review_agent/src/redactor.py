@@ -24,6 +24,20 @@ _REDACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         r"\1[REDACTED]",
     ),
     (
+        re.compile(
+            r"(?i)(=\s*['\"])(?=[^'\"\r\n]{12,}['\"])([^'\"\r\n]*"
+            r"(?:secret|token|password|credential)[^'\"\r\n]*)(['\"])"
+        ),
+        r"\1[REDACTED]\3",
+    ),
+    (
+        re.compile(
+            r"(=\s*['\"])(?=[A-Za-z0-9._~+/=-]{24,}['\"])(?=[^'\"\r\n]*[A-Za-z])"
+            r"(?=[^'\"\r\n]*\d)([A-Za-z0-9._~+/=-]+)(['\"])"
+        ),
+        r"\1[REDACTED]\3",
+    ),
+    (
         re.compile(r"AKIA[0-9A-Z]{16}"),
         "[REDACTED_AWS_KEY]",
     ),

@@ -60,12 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run the pipeline without any external model dependency.",
+        help=(
+            "Record a dry-run audit label; this deterministic prototype never "
+            "calls an external model in either mode."
+        ),
     )
     parser.add_argument(
         "--fake-model",
         action="store_true",
-        help="Enable fake-model mode for deterministic local testing.",
+        help=(
+            "Record a fake-model audit label for deterministic tests; this does "
+            "not select the sandbox runtime."
+        ),
     )
     return parser
 

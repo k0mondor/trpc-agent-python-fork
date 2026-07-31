@@ -128,6 +128,43 @@ def test_linter_scans_only_added_diff_lines(
     assert json.loads(completed.stdout)["warnings"] == []
 
 
+@pytest.mark.parametrize("skill_dir", [SKILL_DIR, EXAMPLE_SKILL_DIR])
+def test_test_script_handles_nonstandard_diff_prefixes(
+    skill_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """Unusual or malformed diff headers must not crash test-path detection."""
+
+    diff_file = tmp_path / "unusual-header.diff"
+    diff_file.write_text(
+        """diff --git a/tests/test_old.py c/tests/test_new.py
+diff --git "a/tests/incomplete.py
+""",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(skill_dir / "scripts" / "run_tests.py"),
+            "--diff-file",
+            str(diff_file),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["changed_test_files"] == [
+        "tests/test_old.py",
+        "tests/test_new.py",
+    ]
+    assert payload["test_update_present"] is True
+
+
 def test_skill_repository_indexes_root_code_review_skill() -> None:
     """SkillToolSet should expose the canonical root code-review skill."""
 

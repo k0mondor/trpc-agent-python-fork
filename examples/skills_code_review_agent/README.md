@@ -23,7 +23,7 @@ tRPC-Agent-Python. It combines deterministic rule detection, a formal
 - Secret redaction before reporting and persistence
 - SQLite storage for tasks, inputs, findings, sandbox runs, filter decisions, and reports
 - `review_report.json` and `review_report.md` output generation
-- Dry-run and fake-model compatible execution
+- Dry-run and fake-model audit labels for deterministic execution
 
 ## Directory Map
 
@@ -94,7 +94,8 @@ python examples/skills_code_review_agent/run_agent.py ^
 runtime execution, and input mapping. The diff path is passed through the
 `inputs` field rather than interpolated into a shell command.
 
-`local` is an explicit development fallback for dry-run and fake-model tests.
+`local` is an explicit development fallback commonly used by dry-run and
+fake-model tests, and is selected only through `--runtime local`.
 It executes only the bundled, pre-resolved scripts with argv-based process
 creation, an environment-variable allowlist, timeout, and output limits; it is
 not presented as sandbox isolation. `cube` and `e2b` are rejected by the Filter
@@ -157,9 +158,11 @@ self-contained.
 
 The main pipeline owns review policy, persistence, and reporting. It does not
 manually create workspaces or run container commands: approved production
-invocations are dispatched through the public `skill_run` tool. In fake-model
-mode, the deterministic orchestrator submits the same tool payload directly so
-the sandbox path remains testable without an API key.
+invocations are dispatched through the public `skill_run` tool. This MVP always
+uses the deterministic reviewer and never creates an external model client.
+`--dry-run` and `--fake-model` are therefore explicit audit labels persisted in
+SQLite for acceptance tests and replay; they do not change execution behavior.
+The `--runtime` option is what selects the Skill execution path.
 
 ## Test Coverage
 

@@ -12,7 +12,12 @@ DEFAULT_OUTPUT_DIR = "review_outputs"
 
 @dataclass(slots=True, frozen=True)
 class ReviewAgentConfig:
-    """Runtime configuration for the code review agent."""
+    """Runtime configuration for the code review agent.
+
+    ``dry_run`` and ``fake_model`` are audit labels for this deterministic MVP.
+    They are persisted with the task but do not select an execution path;
+    ``runtime`` is the setting that controls Skill script execution.
+    """
 
     diff_file: str | None = None
     repo_path: str | None = None

@@ -9,7 +9,7 @@ import pytest
 
 from examples.skills_code_review_agent.agent.agent import run_review_task
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
-from examples.skills_code_review_agent.run_agent import parse_args
+from examples.skills_code_review_agent.run_agent import build_parser, parse_args
 from examples.skills_code_review_agent.src import input_loader as input_loader_module
 from examples.skills_code_review_agent.src.deduper import dedupe_and_classify_findings
 from examples.skills_code_review_agent.src.diff_parser import parse_unified_diff
@@ -18,6 +18,7 @@ from examples.skills_code_review_agent.src.input_loader import (
     load_git_workspace_diff,
     load_review_input,
 )
+from examples.skills_code_review_agent.src.redactor import redact_text
 from examples.skills_code_review_agent.src.rule_engine import run_rule_engine
 from examples.skills_code_review_agent.src.review_types import (
     DiffLineType,
@@ -222,6 +223,27 @@ def test_parse_args_reads_diff_file_mode() -> None:
     assert args.runtime == "local"
     assert args.dry_run is True
     assert args.fake_model is True
+
+
+def test_cli_describes_dry_run_and_fake_model_as_audit_labels() -> None:
+    """Mode flags must not imply execution branches the MVP does not have."""
+
+    help_text = build_parser().format_help()
+
+    assert "Record a dry-run audit label" in help_text
+    assert "Record a fake-model audit label" in help_text
+
+
+def test_redactor_covers_secret_like_and_opaque_assignment_values() -> None:
+    """Fallback assignment rules should hide bare credentials conservatively."""
+
+    secret_like = 'AUTH_HEADER = "super-secret-token-value"'
+    opaque = 'SESSION_VALUE = "a1b2c3d4e5f6g7h8i9j0k1l2"'
+    ordinary = 'MESSAGE = "this-is-a-normal-message"'
+
+    assert "super-secret-token-value" not in redact_text(secret_like)
+    assert "a1b2c3d4e5f6g7h8i9j0k1l2" not in redact_text(opaque)
+    assert redact_text(ordinary) == ordinary
 
 
 def test_run_review_task_surfaces_missing_tests_for_code_only_change(tmp_path: Path) -> None:
