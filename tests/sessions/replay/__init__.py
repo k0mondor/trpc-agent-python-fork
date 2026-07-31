@@ -13,6 +13,8 @@ from .comparator import diff_backend_snapshots
 from .comparator import expected_diff_paths_for_backend_pair
 from .normalizer import normalize_backend_snapshot
 from .report import REPORT_SCHEMA_VERSION
+from .report import build_acceptance_case_report
+from .report import build_acceptance_criteria
 from .report import build_acceptance_quality_metrics
 from .report import build_case_matrix_report
 from .report import build_comparison_report
@@ -23,6 +25,8 @@ __all__ = [
     "MAX_ALLOWED_DIFF_RATIO",
     "MAX_ALLOWED_DIFF_RULES",
     "REPORT_SCHEMA_VERSION",
+    "build_acceptance_case_report",
+    "build_acceptance_criteria",
     "build_acceptance_quality_metrics",
     "build_case_matrix_report",
     "build_comparison_report",

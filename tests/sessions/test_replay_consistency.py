@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import json
 import os
 from time import perf_counter
 from typing import Callable
@@ -30,6 +31,7 @@ from .replay.injectors import inject_redis_session_state
 from .replay.injectors import inject_sqlite_event_author
 from .replay.injectors import inject_sqlite_session_state
 from .replay.injectors import RawStorageTarget
+from .replay.report import build_acceptance_case_report
 from .replay.report import build_acceptance_quality_metrics
 from .replay.report import build_case_matrix_report
 from .replay.report import build_comparison_report
@@ -45,6 +47,78 @@ ADAPTER_TYPES: tuple[Type[ReplayBackendAdapter], ...] = (
 )
 REDIS_REPLAY_URL_ENV = "TRPC_AGENT_REPLAY_REDIS_URL"
 AdapterFactory = Callable[[], ReplayBackendAdapter]
+
+SUPPORTED_REPLAY_MODES = (
+    "inmemory_only",
+    "lightweight_inmemory_sqlite",
+    "integration_inmemory_sqlite_redis",
+)
+REQUIRED_SCENARIO_COVERAGE = {
+    "single_turn_dialogue": ["single_turn_event_author_injection"],
+    "multi_turn_dialogue": ["multi_turn_event_text_injection"],
+    "tool_call_dialogue": ["tool_call_name_injection"],
+    "state_updates": ["state_value_injection", "runtime_state_corruption_fault"],
+    "memory_write_and_read": ["memory_result_loss_injection", "cross_session_memory_aggregation"],
+    "summary_generation_and_update": ["summary_version_injection", "summary_text_injection"],
+    "summary_event_compaction": ["summary_text_injection", "restart_mid_replay_after_summary"],
+    "exception_recovery": ["duplicate_event_runtime_fault", "partial_failure_event_loss_fault"],
+}
+
+
+def _build_backend_statuses(
+    adapter_factories: tuple[AdapterFactory, ...],
+    backend_report_metadata: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    statuses: list[dict[str, object]] = []
+    enabled_names = {factory.name for factory in adapter_factories}
+    for factory in adapter_factories:
+        persistent = factory.name != InMemoryReplayAdapter.name
+        statuses.append({
+            "name": factory.name,
+            "status": "enabled",
+            "persistent": persistent,
+            "restart_before_snapshot": persistent,
+            "runtime": backend_report_metadata.get(factory.name, {}),
+        })
+    if RedisReplayAdapter.name not in enabled_names:
+        statuses.append({
+            "name": RedisReplayAdapter.name,
+            "status": "skipped",
+            "persistent": True,
+            "restart_before_snapshot": True,
+            "reason": f"Set {REDIS_REPLAY_URL_ENV} to enable Redis integration mode.",
+        })
+    return statuses
+
+
+def _build_report_metadata(
+    *,
+    adapter_factories: tuple[AdapterFactory, ...],
+    backend_report_metadata: dict[str, dict[str, object]],
+    mode_name: str,
+    elapsed_seconds: float,
+    comparison_mode: str,
+    acceptance_case_count: int,
+    extra_case_count: int,
+    quality_metrics: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "mode": mode_name,
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "backend_names": [factory.name for factory in adapter_factories],
+        "baseline_backend": adapter_factories[0].name,
+        "comparison_mode": comparison_mode,
+        "supported_modes": list(SUPPORTED_REPLAY_MODES),
+        "backend_statuses": _build_backend_statuses(
+            adapter_factories,
+            backend_report_metadata,
+        ),
+        "required_scenario_coverage": REQUIRED_SCENARIO_COVERAGE,
+        "clock_strategy": get_replay_clock_metadata(),
+        "acceptance_case_count": acceptance_case_count,
+        "extra_case_count": extra_case_count,
+        "quality_metrics": quality_metrics,
+    }
 
 
 def _find_case(case_id: str) -> ReplayCase:
@@ -111,18 +185,16 @@ async def _run_replay_cases(
         write_diff_report(
             DEFAULT_REPORT_PATH,
             case_reports,
-            metadata={
-                "mode": mode_name,
-                "elapsed_seconds": round(elapsed_seconds, 3),
-                "backend_names": [factory.name for factory in adapter_factories],
-                "baseline_backend": adapter_factories[0].name,
-                "comparison_mode": "baseline_vs_all",
-                "backend_summaries": [backend_report_metadata[name] for name in sorted(backend_report_metadata)],
-                "clock_strategy": get_replay_clock_metadata(),
-                "acceptance_case_count": len(REPLAY_ACCEPTANCE_CASES),
-                "extra_case_count": len(cases),
-                "quality_metrics": {},
-            },
+            metadata=_build_report_metadata(
+                adapter_factories=adapter_factories,
+                backend_report_metadata=backend_report_metadata,
+                mode_name=mode_name,
+                elapsed_seconds=elapsed_seconds,
+                comparison_mode="baseline_vs_all",
+                acceptance_case_count=len(REPLAY_ACCEPTANCE_CASES),
+                extra_case_count=len(cases),
+                quality_metrics={},
+            ),
         )
     return all_diffs, case_reports, elapsed_seconds
 
@@ -138,10 +210,11 @@ def _without_injections(case: ReplayCase) -> ReplayCase:
 
 async def _run_acceptance_cases(
     adapter_factories: tuple[AdapterFactory, ...],
-) -> tuple[list[dict[str, object]], float]:
+) -> tuple[list[dict[str, object]], float, dict[str, dict[str, object]]]:
     """Replay each public trajectory once, then compare clean and injected views."""
 
     case_reports: list[dict[str, object]] = []
+    backend_report_metadata: dict[str, dict[str, object]] = {}
     start_time = perf_counter()
     for injected_case in REPLAY_ACCEPTANCE_CASES:
         clean_case = _without_injections(injected_case)
@@ -154,6 +227,8 @@ async def _run_acceptance_cases(
             snapshot.backend_name: runtime_info
             for snapshot, runtime_info, _ in backend_runs
         }
+        for snapshot, _, report_metadata in backend_runs:
+            backend_report_metadata.setdefault(snapshot.backend_name, report_metadata)
         baseline_snapshot = snapshots[0]
         normal_comparisons: list[dict[str, object]] = []
         injected_comparisons: list[dict[str, object]] = []
@@ -188,15 +263,14 @@ async def _run_acceptance_cases(
                     runtime_context=runtime_context,
                 ))
 
-        case_reports.append({
-            "case_id": injected_case.case_id,
-            "description": injected_case.description,
-            "scenario_type": "normal_and_injected",
-            "normal_comparisons": normal_comparisons,
-            "injected_comparisons": injected_comparisons,
-        })
+        case_reports.append(
+            build_acceptance_case_report(
+                injected_case,
+                normal_comparisons=normal_comparisons,
+                injected_comparisons=injected_comparisons,
+            ))
 
-    return case_reports, perf_counter() - start_time
+    return case_reports, perf_counter() - start_time, backend_report_metadata
 
 
 async def _run_full_suite(
@@ -210,7 +284,9 @@ async def _run_full_suite(
     list[dict[str, object]],
     float,
 ]:
-    acceptance_reports, acceptance_elapsed = await _run_acceptance_cases(adapter_factories)
+    acceptance_reports, acceptance_elapsed, backend_report_metadata = await _run_acceptance_cases(
+        adapter_factories
+    )
     extra_diffs, extra_reports, extra_elapsed = await _run_replay_cases(
         adapter_factories,
         mode_name=mode_name,
@@ -222,17 +298,16 @@ async def _run_full_suite(
     write_diff_report(
         DEFAULT_REPORT_PATH,
         acceptance_reports + extra_reports,
-        metadata={
-            "mode": mode_name,
-            "elapsed_seconds": round(elapsed_seconds, 3),
-            "backend_names": [factory.name for factory in adapter_factories],
-            "baseline_backend": adapter_factories[0].name,
-            "comparison_mode": "normal_then_injected_baseline_vs_all",
-            "clock_strategy": get_replay_clock_metadata(),
-            "acceptance_case_count": len(REPLAY_ACCEPTANCE_CASES),
-            "extra_case_count": len(REPLAY_EXTRA_CASES),
-            "quality_metrics": quality_metrics,
-        },
+        metadata=_build_report_metadata(
+            adapter_factories=adapter_factories,
+            backend_report_metadata=backend_report_metadata,
+            mode_name=mode_name,
+            elapsed_seconds=elapsed_seconds,
+            comparison_mode="normal_then_injected_baseline_vs_all",
+            acceptance_case_count=len(REPLAY_ACCEPTANCE_CASES),
+            extra_case_count=len(REPLAY_EXTRA_CASES),
+            quality_metrics=quality_metrics,
+        ),
     )
     return quality_metrics, acceptance_reports, extra_diffs, extra_reports, elapsed_seconds
 
@@ -320,6 +395,44 @@ def test_replay_consistency_smoke_cases() -> None:
     assert quality_metrics["summary_fault_detection_rate"] == 1.0
     assert elapsed_seconds <= 30.0, f"lightweight replay mode exceeded 30s: {elapsed_seconds:.3f}s"
 
+    report = json.loads(DEFAULT_REPORT_PATH.read_text(encoding="utf-8"))
+    assert report["summary"]["overall_status"] == "passed"
+    assert report["summary"]["failed_case_count"] == 0
+    assert report["summary"]["not_evaluated_case_count"] == 0
+    assert [item["criterion_id"] for item in report["acceptance_criteria"]] == [
+        "AC1",
+        "AC2",
+        "AC3",
+        "AC4",
+        "AC5",
+        "AC6",
+    ]
+    assert all(item["status"] == "passed" for item in report["acceptance_criteria"])
+    assert set(report["meta"]["required_scenario_coverage"]) == set(REQUIRED_SCENARIO_COVERAGE)
+
+
+def test_replay_inmemory_only_lightweight_mode() -> None:
+    """All public trajectories must also run without any external persistence service."""
+
+    async def run() -> tuple[list[BackendSnapshot], float]:
+        start_time = perf_counter()
+        snapshots = [
+            (
+                await _run_case_on_backend(
+                    InMemoryReplayAdapter,
+                    _without_injections(case),
+                )
+            )[0]
+            for case in REPLAY_ACCEPTANCE_CASES
+        ]
+        return snapshots, perf_counter() - start_time
+
+    snapshots, elapsed_seconds = asyncio.run(run())
+    assert len(snapshots) == 10
+    assert all(snapshot.backend_name == "inmemory" for snapshot in snapshots)
+    assert all(snapshot.sessions_by_alias for snapshot in snapshots)
+    assert elapsed_seconds <= 30.0
+
 
 def test_acceptance_case_count() -> None:
     """Keep the public acceptance suite fixed at 10 cases."""
@@ -359,7 +472,10 @@ def test_replay_harness_collects_all_session_alias_snapshots() -> None:
     assert snapshot.active_session_alias == "default"
     assert set(snapshot.sessions_by_alias) == {"source", "default"}
     assert snapshot.sessions_by_alias["source"].session_id == "replay-memory-source"
-    assert snapshot.sessions_by_alias["source"].session["events"][0]["text"] == "Please remember that I prefer oolong tea."
+    assert (
+        snapshot.sessions_by_alias["source"].session["events"][0]["text"]
+        == "Please remember that I prefer oolong tea."
+    )
     assert snapshot.sessions_by_alias["default"].session_id == "replay-memory-target"
 
 

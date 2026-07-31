@@ -12,7 +12,31 @@ from .allowed_diff import rules_for_case
 from .comparator import expected_diff_paths_for_backend_pair
 
 
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 5
+
+
+IMPLEMENTATION_PROFILE = {
+    "adapter_lifecycle": "Backend setup, replay, restart, snapshot and close are isolated behind adapters.",
+    "persistence_restart": "Persistent adapters close and reopen services before their final read-back.",
+    "summary_lineage": "Summary content and session_id/summary_id/version/replaces are compared separately.",
+    "multi_session_snapshot": "Every named session alias is retained in sessions_by_alias.",
+    "memory_observations": "Memory reads retain query name, session alias and replay step index.",
+    "allowed_diff_governance": "Rules require reasons, may scope backend pairs and cannot mask summary lineage.",
+    "raw_storage_injection": "SQLite and optional Redis can be corrupted below the SDK boundary.",
+    "exact_acceptance_metrics": "Expected, detected, missing and unexpected paths are reported independently.",
+}
+
+
+def _comparison_passed(comparison: dict[str, Any]) -> bool:
+    return not comparison.get("missing_expected_paths") and not comparison.get(
+        "unexpected_diff_paths"
+    )
+
+
+def _status_for_comparisons(comparisons: list[dict[str, Any]]) -> str:
+    if not comparisons:
+        return "not_evaluated"
+    return "passed" if all(_comparison_passed(item) for item in comparisons) else "failed"
 
 
 def build_case_report(case: ReplayCase, diffs: list[DiffEntry]) -> dict[str, Any]:
@@ -44,7 +68,7 @@ def build_comparison_report(
         expected_diff_paths_for_backend_pair(case, backend_a=backend_a, backend_b=backend_b)
     )
     detected_paths = {diff.path for diff in diffs if not diff.allowed}
-    return {
+    comparison_report = {
         "backend_a": backend_a,
         "backend_b": backend_b,
         "expected_diff_paths": sorted(expected_paths),
@@ -55,6 +79,10 @@ def build_comparison_report(
         "runtime_context": runtime_context or {},
         "diffs": [diff.to_dict() for diff in diffs],
     }
+    comparison_report["status"] = (
+        "passed" if _comparison_passed(comparison_report) else "failed"
+    )
+    return comparison_report
 
 
 def build_case_matrix_report(case: ReplayCase, comparisons: list[dict[str, Any]]) -> dict[str, Any]:
@@ -68,6 +96,7 @@ def build_case_matrix_report(case: ReplayCase, comparisons: list[dict[str, Any]]
         "case_id": case.case_id,
         "description": case.description,
         "scenario_type": "extended",
+        "status": _status_for_comparisons(comparisons),
         "expects_diffs": bool(expected_paths),
         "expected_diff_paths": sorted(expected_paths),
         "allowed_diff_paths": sorted(rule.path for rule in rules_for_case(case)),
@@ -77,6 +106,34 @@ def build_case_matrix_report(case: ReplayCase, comparisons: list[dict[str, Any]]
         "comparison_count": len(comparisons),
         "comparisons": comparisons,
         "diffs": [diff for comparison in comparisons for diff in comparison.get("diffs", [])],
+    }
+
+
+def build_acceptance_case_report(
+    case: ReplayCase,
+    *,
+    normal_comparisons: list[dict[str, Any]],
+    injected_comparisons: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build one public case result with separate clean and injected verdicts."""
+
+    normal_status = _status_for_comparisons(normal_comparisons)
+    injection_status = _status_for_comparisons(injected_comparisons)
+    if "failed" in {normal_status, injection_status}:
+        status = "failed"
+    elif "not_evaluated" in {normal_status, injection_status}:
+        status = "not_evaluated"
+    else:
+        status = "passed"
+    return {
+        "case_id": case.case_id,
+        "description": case.description,
+        "scenario_type": "normal_and_injected",
+        "status": status,
+        "normal_status": normal_status,
+        "injection_status": injection_status,
+        "normal_comparisons": normal_comparisons,
+        "injected_comparisons": injected_comparisons,
     }
 
 
@@ -132,6 +189,177 @@ def build_acceptance_quality_metrics(case_reports: list[dict[str, Any]]) -> dict
     }
 
 
+def _report_locator_metrics(case_reports: list[dict[str, Any]]) -> dict[str, Any]:
+    checked_count = 0
+    complete_count = 0
+    incomplete: list[dict[str, str]] = []
+    for report in case_reports:
+        comparison_groups = (
+            report.get("normal_comparisons", []),
+            report.get("injected_comparisons", []),
+            report.get("comparisons", []),
+        )
+        for comparisons in comparison_groups:
+            for comparison in comparisons:
+                for diff in comparison.get("diffs", []):
+                    if diff.get("allowed"):
+                        continue
+                    checked_count += 1
+                    path = str(diff.get("path", ""))
+                    has_base_locator = bool(diff.get("session_id") and path)
+                    has_values = "left" in diff and "right" in diff and diff["left"] != diff["right"]
+                    has_specific_locator = True
+                    if ".events[" in path:
+                        has_specific_locator = diff.get("event_index") is not None
+                    elif path.startswith("summary") or ".summary" in path:
+                        has_specific_locator = bool(diff.get("summary_id"))
+                    if has_base_locator and has_values and has_specific_locator:
+                        complete_count += 1
+                    else:
+                        incomplete.append({
+                            "case_id": str(report.get("case_id", "")),
+                            "path": path,
+                        })
+    return {
+        "checked_diff_count": checked_count,
+        "complete_diff_count": complete_count,
+        "completeness_rate": complete_count / checked_count if checked_count else 0.0,
+        "incomplete_diffs": incomplete,
+    }
+
+
+def build_acceptance_criteria(
+    metadata: dict[str, Any],
+    case_reports: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Translate the six issue acceptance clauses into machine-readable verdicts."""
+
+    metrics = metadata.get("quality_metrics", {})
+    backend_statuses = metadata.get("backend_statuses", [])
+    enabled_backends = [item for item in backend_statuses if item.get("status") == "enabled"]
+    persistent_backends = [item for item in enabled_backends if item.get("persistent")]
+    backend_passed = len(enabled_backends) >= 2 and bool(persistent_backends)
+    locator_metrics = _report_locator_metrics(case_reports)
+    locator_passed = (
+        locator_metrics["checked_diff_count"] > 0
+        and locator_metrics["completeness_rate"] == 1.0
+    )
+    lightweight_elapsed = metadata.get("elapsed_seconds")
+    if metadata.get("mode") == "lightweight":
+        performance_status = "passed" if lightweight_elapsed <= 30.0 else "failed"
+        performance_actual: Any = lightweight_elapsed
+    else:
+        performance_status = "not_evaluated"
+        performance_actual = "Only lightweight mode has a 30-second requirement."
+
+    return [
+        {
+            "criterion_id": "AC1",
+            "requirement": "Compare InMemory with at least one persistent or simulated persistent backend.",
+            "status": "passed" if backend_passed else "failed",
+            "actual": {
+                "enabled_backends": [item.get("name") for item in enabled_backends],
+                "persistent_backends": [item.get("name") for item in persistent_backends],
+            },
+            "threshold": "at least 2 enabled backends, including 1 persistent backend",
+        },
+        {
+            "criterion_id": "AC2",
+            "requirement": "Detect every injected inconsistency in the 10 public replay cases.",
+            "status": (
+                "passed"
+                if metrics.get("public_case_count") == 10
+                and metrics.get("injection_detection_rate") == 1.0
+                else "failed"
+            ),
+            "actual": {
+                "case_count": metrics.get("public_case_count", 0),
+                "detection_rate": metrics.get("injection_detection_rate", 0.0),
+                "missed_case_ids": metrics.get("injection_missed_case_ids", []),
+            },
+            "threshold": "10 cases and 100% detection",
+        },
+        {
+            "criterion_id": "AC3",
+            "requirement": "Keep the false-positive rate for normal cases at or below 5%.",
+            "status": (
+                "passed"
+                if metrics.get("normal_false_positive_rate", 1.0) <= 0.05
+                else "failed"
+            ),
+            "actual": metrics.get("normal_false_positive_rate", 1.0),
+            "threshold": "<= 0.05",
+        },
+        {
+            "criterion_id": "AC4",
+            "requirement": "Detect summary loss, overwrite-lineage errors and session ownership errors.",
+            "status": (
+                "passed"
+                if metrics.get("summary_fault_detection_rate") == 1.0
+                else "failed"
+            ),
+            "actual": {
+                "detection_rate": metrics.get("summary_fault_detection_rate", 0.0),
+                "missed_case_ids": metrics.get("summary_fault_missed_case_ids", []),
+            },
+            "threshold": "100% across all 3 summary fault classes",
+        },
+        {
+            "criterion_id": "AC5",
+            "requirement": "Locate every diff by session, field path, values, and event or summary identity.",
+            "status": "passed" if locator_passed else "failed",
+            "actual": locator_metrics,
+            "threshold": "100% locator completeness",
+        },
+        {
+            "criterion_id": "AC6",
+            "requirement": "Complete lightweight mode within 30 seconds; integrations may be skipped.",
+            "status": performance_status,
+            "actual": performance_actual,
+            "threshold": "<= 30 seconds in lightweight mode",
+        },
+    ]
+
+
+def build_report_summary(
+    case_reports: list[dict[str, Any]],
+    acceptance_criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    statuses = [str(report.get("status", "not_evaluated")) for report in case_reports]
+    diff_records = [
+        (diff, comparison)
+        for report in case_reports
+        for comparison_key in ("normal_comparisons", "injected_comparisons", "comparisons")
+        for comparison in report.get(comparison_key, [])
+        for diff in comparison.get("diffs", [])
+    ]
+    failed_criteria = [
+        str(item["criterion_id"])
+        for item in acceptance_criteria
+        if item.get("status") == "failed"
+    ]
+    return {
+        "overall_status": "failed" if "failed" in statuses or failed_criteria else "passed",
+        "case_count": len(case_reports),
+        "passed_case_count": statuses.count("passed"),
+        "failed_case_count": statuses.count("failed"),
+        "not_evaluated_case_count": statuses.count("not_evaluated"),
+        "diff_count": len(diff_records),
+        "expected_diff_count": sum(
+            not diff.get("allowed", False)
+            and diff.get("path") in comparison.get("expected_diff_paths", [])
+            for diff, comparison in diff_records
+        ),
+        "allowed_diff_count": sum(bool(diff.get("allowed")) for diff, _ in diff_records),
+        "unexpected_diff_count": sum(
+            not diff.get("allowed", False)
+            and diff.get("path") in comparison.get("unexpected_diff_paths", [])
+            for diff, comparison in diff_records
+        ),
+        "failed_criterion_ids": failed_criteria,
+    }
+
+
 def validate_report_payload(payload: dict[str, Any]) -> None:
     """Validate the stable top-level contract mirrored by the JSON Schema file."""
 
@@ -139,6 +367,12 @@ def validate_report_payload(payload: dict[str, Any]) -> None:
         raise ValueError(f"Unsupported replay report schema version: {payload.get('schema_version')}")
     if not isinstance(payload.get("meta"), dict):
         raise ValueError("Replay report 'meta' must be an object")
+    if not isinstance(payload.get("summary"), dict):
+        raise ValueError("Replay report 'summary' must be an object")
+    if not isinstance(payload.get("acceptance_criteria"), list):
+        raise ValueError("Replay report 'acceptance_criteria' must be an array")
+    if not isinstance(payload.get("implementation_profile"), dict):
+        raise ValueError("Replay report 'implementation_profile' must be an object")
     if not isinstance(payload.get("cases"), list):
         raise ValueError("Replay report 'cases' must be an array")
     required_meta = {
@@ -150,6 +384,9 @@ def validate_report_payload(payload: dict[str, Any]) -> None:
         "acceptance_case_count",
         "extra_case_count",
         "quality_metrics",
+        "supported_modes",
+        "backend_statuses",
+        "required_scenario_coverage",
     }
     missing_meta = sorted(required_meta - set(payload["meta"]))
     if missing_meta:
@@ -161,6 +398,8 @@ def validate_report_payload(payload: dict[str, Any]) -> None:
             raise ValueError(f"Replay report case {index} requires a non-empty case_id")
         if not isinstance(case_report.get("scenario_type"), str):
             raise ValueError(f"Replay report case {index} requires scenario_type")
+        if case_report.get("status") not in {"passed", "failed", "not_evaluated"}:
+            raise ValueError(f"Replay report case {index} requires a valid status")
         if case_report["scenario_type"] not in {"normal_and_injected", "extended"}:
             raise ValueError(
                 f"Replay report case {index} has unsupported scenario_type: "
@@ -173,9 +412,14 @@ def write_diff_report(
     case_reports: list[dict[str, Any]],
     metadata: Optional[dict[str, Any]] = None,
 ) -> None:
+    report_metadata = metadata or {}
+    acceptance_criteria = build_acceptance_criteria(report_metadata, case_reports)
     payload = {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "meta": metadata or {},
+        "summary": build_report_summary(case_reports, acceptance_criteria),
+        "acceptance_criteria": acceptance_criteria,
+        "implementation_profile": IMPLEMENTATION_PROFILE,
+        "meta": report_metadata,
         "cases": case_reports,
     }
     validate_report_payload(payload)

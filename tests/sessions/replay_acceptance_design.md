@@ -1,32 +1,46 @@
 # Replay Consistency Design Note
 
-## 设计说明
-框架用统一 `ReplayCase` 驱动 InMemory、文件型 SQLite 与可选 Redis，Adapter 负责服务生命周期、持久化重启和多 session 快照；归一化、比较、allowed-diff 治理、报告和原始存储注入拆为独立模块。快照只投影业务字段并保留工具 call ID；state 字符串严格比较，memory 文本与顺序做确定性收敛。summary 同时比较文本与 `session_id/summary_id/version/replaces` lineage，后四项禁止加入白名单。allowed diff 必须有理由，可限定 backend pair，仅允许列表下标通配，每 case 最多 8 条且实际放行字段不超过 10%。公开 10 条轨迹各回放一次，先比较原始快照统计误报率，再在副本注入精确路径漂移统计检出率；SQLite/Redis 抓取前关闭并重开服务。扩展测试覆盖 runtime fault、非活跃 session、多 user、memory observation，以及绕过 SDK 直接修改 SQLite/Redis 的真实存储污染。schema v4 报告记录字段路径、两端值、定位信息、运行上下文和质量指标。
+## 设计说明（150–300 字）
 
-## 官方 10 条验收 Case
-| Case ID | 场景 | 验收点 |
+框架以轨迹驱动 InMemory、SQLite 和可选 Redis，Adapter 封装写入、重启及多 session 快照。归一化仅处理时间戳、自动 ID、字段顺序和摘要空白；state、工具 call ID 及 summary 归属、版本、覆盖关系严格比较，禁止加入 allowed-diff。白名单须说明原因并限定后端。10 条公开轨迹验证正常快照和精确路径注入，统计检出率与误报率；扩展轨迹覆盖 memory observation、摘要后重启和异常恢复。SQLite/Redis 可绕过 SDK 注入存储污染，schema v5 报告逐 case 结论、两端值、定位信息和六项验收证据。
+
+## Issue 要求覆盖
+
+| 原要求 | 对应轨迹或机制 | 报告证据 |
 | --- | --- | --- |
-| `single_turn_event_author_injection` | 单轮普通对话 | event author 漂移 |
-| `multi_turn_event_text_injection` | 多轮对话 | 指定 event index 文本漂移 |
-| `tool_call_name_injection` | 工具调用对话 | function call 名称漂移 |
-| `state_value_injection` | state 多次覆盖 | state 最终值漂移 |
-| `memory_result_loss_injection` | memory 写入和检索 | memory 结果丢失 |
-| `summary_text_injection` | summary 与事件截断 | summary 内容漂移 |
-| `summary_version_injection` | summary 更新 | version 回退 |
-| `summary_binding_mismatch_injection` | summary 归属错误 | `summary.session_id` 检出 |
-| `summary_missing_injection` | summary 丢失 | `summary` 缺失检出 |
-| `summary_lineage_corruption_injection` | summary 覆盖错误 | `summary.replaces` 检出 |
+| 单轮普通对话 | `single_turn_event_author_injection` | 精确到 `session.events[0].author` |
+| 多轮对话 | `multi_turn_event_text_injection` | 精确 event index 与文本值 |
+| 工具调用 | `tool_call_name_injection` | function call name 与 call ID 保留 |
+| state 多次更新/覆盖 | `state_value_injection`、`runtime_state_corruption_fault` | 最终 state 字段路径 |
+| memory 写入/读取 | `memory_result_loss_injection`、跨 session/user 扩展轨迹 | query、session alias、step index |
+| summary 生成/更新 | `summary_text_injection`、`summary_version_injection` | 内容与 lineage 分开比较 |
+| summary 与事件截断 | `summary_text_injection`、`restart_mid_replay_after_summary` | summary、历史/保留/后续事件共同快照 |
+| 异常恢复 | duplicate、partial failure、raw SQLite/Redis corruption | 重复、丢失、脏 state/summary 精确差异 |
+| 轻量/集成模式 | InMemory-only；默认 InMemory+SQLite；环境变量启用 Redis | `meta.supported_modes` 与 `backend_statuses` |
 
-## 扩展 Case
-- `duplicate_event_runtime_fault`：补充重复写入异常。
-- `runtime_state_corruption_fault`：补充运行时 state 污染。
-- `runtime_summary_loss_fault`：补充运行时 summary 丢失。
-- `runtime_summary_overwrite_fault`：补充运行时 summary 覆盖关系污染。
-- `partial_failure_event_loss_fault`：补充中途失败导致事件丢失。
-- `non_active_session_summary_loss_fault`：补充非活跃 session 的 summary 损坏检测。
-- `cross_session_memory_aggregation`：补充同一 app/user 下跨 session 的 memory 聚合语义。
-- `restart_mid_replay_after_summary`：补充 summary 持久化后中途重启再续写的恢复语义。
-- `state_namespace_roundtrip`：补充 `app:/user:/temp:` 状态命名空间在跨 session 和重启后的可见性语义。
-- `cross_user_memory_isolation`：补充同一 app 下不同 user 的长期记忆隔离语义。
-- `duplicate_memory_query_name_across_sessions`：用定向测试覆盖跨 alias 的同名 memory query 不应互相覆盖。
-- `memory_query_observation_survives_restart`：用定向测试覆盖重启后 memory query 观测不得被后续结果回填。
+## 三个方案对比
+
+对比口径为本仓库的原 PR 第一版、已经合并的 PR #178 方案与当前 v2；“部分”表示有基础覆盖，但未形成当前版本的独立验收证据。
+
+| 能力 | 原 PR 第一版 | 已合并方案 | 当前 v2 |
+| --- | --- | --- | --- |
+| Adapter 与后端接入 | 强 | 有 | 保留并明确生命周期协议 |
+| 持久化关闭/重开后读回 | 有 | 部分 | SQLite/Redis 每 case 固定执行 |
+| summary 内容与 lineage | 强 | 部分 | 内容可归一化，归属/版本/覆盖严格比较 |
+| 多 session / 多 user | 有 | 部分 | 全 alias 快照与隔离轨迹 |
+| memory observation | 逐步保留 | 结果快照为主 | query + alias + step index，不被后读回填 |
+| 10 条注入、误报及 summary 指标 | 有 | 部分 | 逐 case 状态 + AC2/AC3/AC4 精确指标 |
+| 模块拆分与组件单测 | 较集中 | 强 | 采用 merged 的职责拆分并补契约测试 |
+| JSON Schema | 无独立稳定契约 | 有 | schema v5，覆盖顶层结论与六项 AC |
+| allowed-diff 治理 | 基础 | 强 | 原因、后端对、通配限制、比例上限、lineage 禁入 |
+| 原始存储注入 | 无 | 有 | SQLite 默认验证，Redis 环境开启后验证 |
+| SDK 修改隔离 | 与框架混合 | tests-only | SDK 修复与 tests-only 框架分为独立提交 |
+
+当前 v2 的优势不是增加更多宽松归一化，而是组合两边长处：保留第一版对真实生命周期和复杂语义的覆盖，同时采用 merged 方案更容易审查、扩展和维护的工程结构。机器报告直接回答“是否达标、哪条未达标、证据在哪里”，避免只能人工翻阅 diff 数组。
+
+## 运行方式
+
+- InMemory-only：运行 `test_replay_inmemory_only_lightweight_mode`，不依赖数据库或网络。
+- 默认轻量模式：运行 `test_replay_consistency_smoke_cases`，比较 InMemory 与临时文件 SQLite，目标小于 30 秒。
+- Redis 集成模式：设置 `TRPC_AGENT_REPLAY_REDIS_URL` 后运行 Redis integration 测试；未设置时明确 skip。
+- 报告：`session_memory_summary_diff_report.json`；契约：`replay_report.schema.json`。

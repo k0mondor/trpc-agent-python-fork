@@ -14,6 +14,8 @@ from .replay.allowed_diff import validate_allowed_diff_rules
 from .replay.comparator import diff_backend_snapshots
 from .replay.normalizer import normalize_backend_snapshot
 from .replay.report import REPORT_SCHEMA_VERSION
+from .replay.report import build_acceptance_case_report
+from .replay.report import build_acceptance_criteria
 from .replay.report import build_acceptance_quality_metrics
 from .replay.report import validate_report_payload
 from .replay.report import write_diff_report
@@ -135,6 +137,7 @@ def test_report_schema_version_and_contract(tmp_path: Path) -> None:
         "case_id": "case-1",
         "description": "example",
         "scenario_type": "extended",
+        "status": "not_evaluated",
         "comparisons": [],
     }]
     metadata = {
@@ -143,6 +146,24 @@ def test_report_schema_version_and_contract(tmp_path: Path) -> None:
         "backend_names": ["inmemory", "sqlite"],
         "baseline_backend": "inmemory",
         "comparison_mode": "baseline_vs_all",
+        "supported_modes": ["inmemory_only", "lightweight_inmemory_sqlite"],
+        "backend_statuses": [
+            {
+                "name": "inmemory",
+                "status": "enabled",
+                "persistent": False,
+                "restart_before_snapshot": False,
+            },
+            {
+                "name": "sqlite",
+                "status": "enabled",
+                "persistent": True,
+                "restart_before_snapshot": True,
+            },
+        ],
+        "required_scenario_coverage": {
+            f"scenario_{index}": [f"case_{index}"] for index in range(8)
+        },
         "acceptance_case_count": 0,
         "extra_case_count": 1,
         "quality_metrics": {},
@@ -155,7 +176,84 @@ def test_report_schema_version_and_contract(tmp_path: Path) -> None:
     schema_path = Path(__file__).with_name("replay_report.schema.json")
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert schema["properties"]["schema_version"]["const"] == REPORT_SCHEMA_VERSION
-    assert set(schema["required"]) == {"schema_version", "meta", "cases"}
+    assert set(schema["required"]) == {
+        "schema_version",
+        "summary",
+        "acceptance_criteria",
+        "implementation_profile",
+        "meta",
+        "cases",
+    }
+
+
+def test_design_note_length_matches_issue_delivery_contract() -> None:
+    design_path = Path(__file__).with_name("replay_acceptance_design.md")
+    lines = design_path.read_text(encoding="utf-8").splitlines()
+    heading_index = lines.index("## 设计说明（150–300 字）")
+    design_note = lines[heading_index + 2]
+    assert 150 <= len(design_note) <= 300
+
+
+def test_acceptance_case_and_criteria_expose_explicit_verdicts() -> None:
+    comparison = {
+        "expected_diff_paths": ["summary.version"],
+        "detected_diff_paths": ["summary.version"],
+        "missing_expected_paths": [],
+        "unexpected_diff_paths": [],
+        "diffs": [{
+            "path": "summary.version",
+            "session_id": "session-1",
+            "summary_id": "summary-1",
+            "event_index": None,
+            "left": 2,
+            "right": 1,
+            "allowed": False,
+        }],
+    }
+    clean_comparison = {
+        "expected_diff_paths": [],
+        "detected_diff_paths": [],
+        "missing_expected_paths": [],
+        "unexpected_diff_paths": [],
+        "diffs": [],
+    }
+    case_report = build_acceptance_case_report(
+        ReplayCase("summary_version_injection", "summary version"),
+        normal_comparisons=[clean_comparison],
+        injected_comparisons=[comparison],
+    )
+    assert case_report["status"] == "passed"
+    assert case_report["normal_status"] == "passed"
+    assert case_report["injection_status"] == "passed"
+
+    criteria = build_acceptance_criteria(
+        {
+            "mode": "lightweight",
+            "elapsed_seconds": 1.25,
+            "backend_statuses": [
+                {"name": "inmemory", "status": "enabled", "persistent": False},
+                {"name": "sqlite", "status": "enabled", "persistent": True},
+            ],
+            "quality_metrics": {
+                "public_case_count": 10,
+                "injection_detection_rate": 1.0,
+                "injection_missed_case_ids": [],
+                "normal_false_positive_rate": 0.0,
+                "summary_fault_detection_rate": 1.0,
+                "summary_fault_missed_case_ids": [],
+            },
+        },
+        [case_report],
+    )
+    assert [item["criterion_id"] for item in criteria] == [
+        "AC1",
+        "AC2",
+        "AC3",
+        "AC4",
+        "AC5",
+        "AC6",
+    ]
+    assert all(item["status"] == "passed" for item in criteria)
 
 
 def test_quality_metrics_require_exact_injected_paths() -> None:

@@ -1,14 +1,170 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
+  "summary": {
+    "overall_status": "passed",
+    "case_count": 20,
+    "passed_case_count": 20,
+    "failed_case_count": 0,
+    "not_evaluated_case_count": 0,
+    "diff_count": 17,
+    "expected_diff_count": 17,
+    "allowed_diff_count": 0,
+    "unexpected_diff_count": 0,
+    "failed_criterion_ids": []
+  },
+  "acceptance_criteria": [
+    {
+      "criterion_id": "AC1",
+      "requirement": "Compare InMemory with at least one persistent or simulated persistent backend.",
+      "status": "passed",
+      "actual": {
+        "enabled_backends": [
+          "inmemory",
+          "sqlite"
+        ],
+        "persistent_backends": [
+          "sqlite"
+        ]
+      },
+      "threshold": "at least 2 enabled backends, including 1 persistent backend"
+    },
+    {
+      "criterion_id": "AC2",
+      "requirement": "Detect every injected inconsistency in the 10 public replay cases.",
+      "status": "passed",
+      "actual": {
+        "case_count": 10,
+        "detection_rate": 1.0,
+        "missed_case_ids": []
+      },
+      "threshold": "10 cases and 100% detection"
+    },
+    {
+      "criterion_id": "AC3",
+      "requirement": "Keep the false-positive rate for normal cases at or below 5%.",
+      "status": "passed",
+      "actual": 0.0,
+      "threshold": "<= 0.05"
+    },
+    {
+      "criterion_id": "AC4",
+      "requirement": "Detect summary loss, overwrite-lineage errors and session ownership errors.",
+      "status": "passed",
+      "actual": {
+        "detection_rate": 1.0,
+        "missed_case_ids": []
+      },
+      "threshold": "100% across all 3 summary fault classes"
+    },
+    {
+      "criterion_id": "AC5",
+      "requirement": "Locate every diff by session, field path, values, and event or summary identity.",
+      "status": "passed",
+      "actual": {
+        "checked_diff_count": 17,
+        "complete_diff_count": 17,
+        "completeness_rate": 1.0,
+        "incomplete_diffs": []
+      },
+      "threshold": "100% locator completeness"
+    },
+    {
+      "criterion_id": "AC6",
+      "requirement": "Complete lightweight mode within 30 seconds; integrations may be skipped.",
+      "status": "passed",
+      "actual": 4.654,
+      "threshold": "<= 30 seconds in lightweight mode"
+    }
+  ],
+  "implementation_profile": {
+    "adapter_lifecycle": "Backend setup, replay, restart, snapshot and close are isolated behind adapters.",
+    "persistence_restart": "Persistent adapters close and reopen services before their final read-back.",
+    "summary_lineage": "Summary content and session_id/summary_id/version/replaces are compared separately.",
+    "multi_session_snapshot": "Every named session alias is retained in sessions_by_alias.",
+    "memory_observations": "Memory reads retain query name, session alias and replay step index.",
+    "allowed_diff_governance": "Rules require reasons, may scope backend pairs and cannot mask summary lineage.",
+    "raw_storage_injection": "SQLite and optional Redis can be corrupted below the SDK boundary.",
+    "exact_acceptance_metrics": "Expected, detected, missing and unexpected paths are reported independently."
+  },
   "meta": {
     "mode": "lightweight",
-    "elapsed_seconds": 4.449,
+    "elapsed_seconds": 4.654,
     "backend_names": [
       "inmemory",
       "sqlite"
     ],
     "baseline_backend": "inmemory",
     "comparison_mode": "normal_then_injected_baseline_vs_all",
+    "supported_modes": [
+      "inmemory_only",
+      "lightweight_inmemory_sqlite",
+      "integration_inmemory_sqlite_redis"
+    ],
+    "backend_statuses": [
+      {
+        "name": "inmemory",
+        "status": "enabled",
+        "persistent": false,
+        "restart_before_snapshot": false,
+        "runtime": {
+          "backend_name": "inmemory",
+          "storage_kind": "inmemory"
+        }
+      },
+      {
+        "name": "sqlite",
+        "status": "enabled",
+        "persistent": true,
+        "restart_before_snapshot": true,
+        "runtime": {
+          "backend_name": "sqlite",
+          "storage_kind": "sqlite",
+          "connection": {
+            "scheme": "sqlite",
+            "session_db": "sessions.sqlite",
+            "memory_db": "memory.sqlite"
+          }
+        }
+      },
+      {
+        "name": "redis",
+        "status": "skipped",
+        "persistent": true,
+        "restart_before_snapshot": true,
+        "reason": "Set TRPC_AGENT_REPLAY_REDIS_URL to enable Redis integration mode."
+      }
+    ],
+    "required_scenario_coverage": {
+      "single_turn_dialogue": [
+        "single_turn_event_author_injection"
+      ],
+      "multi_turn_dialogue": [
+        "multi_turn_event_text_injection"
+      ],
+      "tool_call_dialogue": [
+        "tool_call_name_injection"
+      ],
+      "state_updates": [
+        "state_value_injection",
+        "runtime_state_corruption_fault"
+      ],
+      "memory_write_and_read": [
+        "memory_result_loss_injection",
+        "cross_session_memory_aggregation"
+      ],
+      "summary_generation_and_update": [
+        "summary_version_injection",
+        "summary_text_injection"
+      ],
+      "summary_event_compaction": [
+        "summary_text_injection",
+        "restart_mid_replay_after_summary"
+      ],
+      "exception_recovery": [
+        "duplicate_event_runtime_fault",
+        "partial_failure_event_loss_fault"
+      ]
+    },
     "clock_strategy": {
       "mode": "freshness_safe",
       "future_skew_seconds": 60.0,
@@ -36,6 +192,9 @@
       "case_id": "single_turn_event_author_injection",
       "description": "Single-turn replay must detect an injected event author mismatch.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -60,7 +219,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -106,7 +266,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -114,6 +275,9 @@
       "case_id": "multi_turn_event_text_injection",
       "description": "Multi-turn replay must detect an injected event text mismatch at its exact index.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -138,7 +302,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -184,7 +349,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -192,6 +358,9 @@
       "case_id": "tool_call_name_injection",
       "description": "Tool replay must detect an injected function-call name mismatch.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -216,7 +385,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -262,7 +432,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -270,6 +441,9 @@
       "case_id": "state_value_injection",
       "description": "State replay must detect an injected overwritten preference.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -294,7 +468,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -340,7 +515,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -348,6 +524,9 @@
       "case_id": "memory_result_loss_injection",
       "description": "Memory replay must detect an injected loss of persisted search results.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -372,7 +551,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -418,7 +598,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -426,6 +607,9 @@
       "case_id": "summary_text_injection",
       "description": "Summary replay must detect an injected semantic content mismatch.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -450,7 +634,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -496,7 +681,8 @@
               "summary_id": "replay-summary-history:summary:v1",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -504,6 +690,9 @@
       "case_id": "summary_version_injection",
       "description": "Summary replay must detect an injected version rollback.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -528,7 +717,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -574,7 +764,8 @@
               "summary_id": "replay-summary-version:summary:v2",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -582,6 +773,9 @@
       "case_id": "summary_binding_mismatch_injection",
       "description": "Injected summary ownership mismatch must be reported at the exact summary field path.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -606,7 +800,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -652,7 +847,8 @@
               "summary_id": "replay-negative-summary-binding:summary:v1",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -660,6 +856,9 @@
       "case_id": "summary_missing_injection",
       "description": "Injected summary loss must be detected as a summary-level mismatch.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -684,7 +883,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -731,7 +931,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785501260.981,
+                "summary_timestamp": 1785502335.408,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -746,7 +946,8 @@
               "summary_id": "replay-negative-summary-missing:summary:v1",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -754,6 +955,9 @@
       "case_id": "summary_lineage_corruption_injection",
       "description": "Injected summary lineage corruption must be detected via the replaces field.",
       "scenario_type": "normal_and_injected",
+      "status": "passed",
+      "normal_status": "passed",
+      "injection_status": "passed",
       "normal_comparisons": [
         {
           "backend_a": "inmemory",
@@ -778,7 +982,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "injected_comparisons": [
@@ -824,7 +1029,8 @@
               "summary_id": "replay-negative-summary-lineage:summary:v2",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ]
     },
@@ -832,6 +1038,7 @@
       "case_id": "duplicate_event_runtime_fault",
       "description": "A duplicated event injected during replay must be detected as an event-count mismatch.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "session.events.length"
@@ -886,7 +1093,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -910,6 +1118,7 @@
       "case_id": "runtime_state_corruption_fault",
       "description": "A runtime state corruption must be detected on the precise state path.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "state.preference"
@@ -964,7 +1173,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -988,6 +1198,7 @@
       "case_id": "runtime_summary_loss_fault",
       "description": "A runtime summary deletion must be detected as a missing summary.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "summary"
@@ -1043,7 +1254,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785501261.357,
+                "summary_timestamp": 1785502335.784,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -1058,7 +1269,8 @@
               "summary_id": "replay-negative-runtime-summary-loss:summary:v1",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -1077,7 +1289,7 @@
             "version": 1,
             "replaces": null,
             "summarized_event_count": 2,
-            "summary_timestamp": 1785501261.357,
+            "summary_timestamp": 1785502335.784,
             "metadata": {
               "replaces": null,
               "summarized_event_count": 2,
@@ -1098,6 +1310,7 @@
       "case_id": "runtime_summary_overwrite_fault",
       "description": "A runtime summary overwrite must be detected through lineage replacement fields.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "summary.metadata.replaces",
@@ -1170,7 +1383,8 @@
               "summary_id": "replay-negative-runtime-summary-overwrite:summary:v2",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -1208,6 +1422,7 @@
       "case_id": "partial_failure_event_loss_fault",
       "description": "A partial failure that loses the final event but keeps state must be detected as an event-window mismatch.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "session.events.length"
@@ -1262,7 +1477,8 @@
               "summary_id": null,
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -1286,6 +1502,7 @@
       "case_id": "non_active_session_summary_loss_fault",
       "description": "A runtime summary deletion on a non-active session alias must still be detected through alias-scoped snapshots.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": true,
       "expected_diff_paths": [
         "sessions_by_alias.source.summary"
@@ -1341,7 +1558,7 @@
                 "version": 1,
                 "replaces": null,
                 "summarized_event_count": 2,
-                "summary_timestamp": 1785501262.16,
+                "summary_timestamp": 1785502336.633,
                 "metadata": {
                   "replaces": null,
                   "summarized_event_count": 2,
@@ -1356,7 +1573,8 @@
               "summary_id": "replay-negative-source-session:summary:v1",
               "reason": null
             }
-          ]
+          ],
+          "status": "passed"
         }
       ],
       "diffs": [
@@ -1375,7 +1593,7 @@
             "version": 1,
             "replaces": null,
             "summarized_event_count": 2,
-            "summary_timestamp": 1785501262.16,
+            "summary_timestamp": 1785502336.633,
             "metadata": {
               "replaces": null,
               "summarized_event_count": 2,
@@ -1396,6 +1614,7 @@
       "case_id": "cross_session_memory_aggregation",
       "description": "Memory written by one session should remain searchable from another session under the same app/user scope.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": false,
       "expected_diff_paths": [],
       "allowed_diff_paths": [],
@@ -1427,7 +1646,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "diffs": []
@@ -1436,6 +1656,7 @@
       "case_id": "restart_mid_replay_after_summary",
       "description": "Persistent backends should restore summary state correctly after a restart and continue replaying later turns.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": false,
       "expected_diff_paths": [],
       "allowed_diff_paths": [],
@@ -1467,7 +1688,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "diffs": []
@@ -1476,6 +1698,7 @@
       "case_id": "state_namespace_roundtrip",
       "description": "App, user, session, and temp state should preserve their intended visibility across sessions and restarts.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": false,
       "expected_diff_paths": [],
       "allowed_diff_paths": [],
@@ -1507,7 +1730,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "diffs": []
@@ -1516,6 +1740,7 @@
       "case_id": "cross_user_memory_isolation",
       "description": "Memory saved for one user must not become visible to another user in the same application.",
       "scenario_type": "extended",
+      "status": "passed",
       "expects_diffs": false,
       "expected_diff_paths": [],
       "allowed_diff_paths": [],
@@ -1547,7 +1772,8 @@
               }
             }
           },
-          "diffs": []
+          "diffs": [],
+          "status": "passed"
         }
       ],
       "diffs": []

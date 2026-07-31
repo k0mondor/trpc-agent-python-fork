@@ -1,12 +1,69 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://trpc.group/schemas/session-memory-replay-report-v4.json",
-  "title": "Session/Memory Replay Consistency Report",
+  "$id": "https://trpc.group/schemas/session-memory-replay-report-v5.json",
+  "title": "Session/Memory/Summary Replay Consistency Report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "meta", "cases"],
+  "required": [
+    "schema_version",
+    "summary",
+    "acceptance_criteria",
+    "implementation_profile",
+    "meta",
+    "cases"
+  ],
   "properties": {
-    "schema_version": {"const": 4},
+    "schema_version": {"const": 5},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall_status",
+        "case_count",
+        "passed_case_count",
+        "failed_case_count",
+        "not_evaluated_case_count",
+        "diff_count",
+        "expected_diff_count",
+        "allowed_diff_count",
+        "unexpected_diff_count",
+        "failed_criterion_ids"
+      ],
+      "properties": {
+        "overall_status": {"enum": ["passed", "failed"]},
+        "case_count": {"type": "integer", "minimum": 0},
+        "passed_case_count": {"type": "integer", "minimum": 0},
+        "failed_case_count": {"type": "integer", "minimum": 0},
+        "not_evaluated_case_count": {"type": "integer", "minimum": 0},
+        "diff_count": {"type": "integer", "minimum": 0},
+        "expected_diff_count": {"type": "integer", "minimum": 0},
+        "allowed_diff_count": {"type": "integer", "minimum": 0},
+        "unexpected_diff_count": {"type": "integer", "minimum": 0},
+        "failed_criterion_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion_id", "requirement", "status", "actual", "threshold"],
+        "properties": {
+          "criterion_id": {"enum": ["AC1", "AC2", "AC3", "AC4", "AC5", "AC6"]},
+          "requirement": {"type": "string"},
+          "status": {"enum": ["passed", "failed", "not_evaluated"]},
+          "actual": {},
+          "threshold": {"type": "string"}
+        }
+      }
+    },
+    "implementation_profile": {
+      "type": "object",
+      "minProperties": 8,
+      "additionalProperties": {"type": "string"}
+    },
     "meta": {
       "type": "object",
       "required": [
@@ -15,6 +72,9 @@
         "backend_names",
         "baseline_backend",
         "comparison_mode",
+        "supported_modes",
+        "backend_statuses",
+        "required_scenario_coverage",
         "acceptance_case_count",
         "extra_case_count",
         "quality_metrics"
@@ -25,6 +85,31 @@
         "backend_names": {"type": "array", "items": {"type": "string"}},
         "baseline_backend": {"type": "string"},
         "comparison_mode": {"type": "string"},
+        "supported_modes": {"type": "array", "items": {"type": "string"}},
+        "backend_statuses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status", "persistent", "restart_before_snapshot"],
+            "properties": {
+              "name": {"type": "string"},
+              "status": {"enum": ["enabled", "skipped"]},
+              "persistent": {"type": "boolean"},
+              "restart_before_snapshot": {"type": "boolean"},
+              "reason": {"type": "string"},
+              "runtime": {"type": "object"}
+            }
+          }
+        },
+        "required_scenario_coverage": {
+          "type": "object",
+          "minProperties": 8,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          }
+        },
         "clock_strategy": {"type": "object"},
         "acceptance_case_count": {"type": "integer", "minimum": 0},
         "extra_case_count": {"type": "integer", "minimum": 0},
@@ -35,11 +120,14 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["case_id", "description", "scenario_type"],
+        "required": ["case_id", "description", "scenario_type", "status"],
         "properties": {
           "case_id": {"type": "string", "minLength": 1},
           "description": {"type": "string"},
           "scenario_type": {"enum": ["normal_and_injected", "extended"]},
+          "status": {"enum": ["passed", "failed", "not_evaluated"]},
+          "normal_status": {"enum": ["passed", "failed", "not_evaluated"]},
+          "injection_status": {"enum": ["passed", "failed", "not_evaluated"]},
           "normal_comparisons": {"type": "array"},
           "injected_comparisons": {"type": "array"},
           "comparisons": {"type": "array"},

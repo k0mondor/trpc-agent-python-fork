@@ -23,11 +23,16 @@ python -m pytest tests/sessions/test_replay_modules.py \
   tests/sessions/test_replay_consistency.py -q
 ```
 
+Run `test_replay_inmemory_only_lightweight_mode` alone when no persistent
+backend is wanted. The default lightweight suite uses an ephemeral file-backed
+SQLite database and needs no external service.
+
 Set `TRPC_AGENT_REPLAY_REDIS_URL` to add Redis comparisons and raw Redis
 corruption tests. The generated report follows
 `../replay_report.schema.json`; it records normal/injected comparisons,
 expected/missing/unexpected field paths, backend values, locators, runtime
-context, and the three acceptance quality rates.
+context, per-case verdicts, and machine-readable evidence for all six issue
+acceptance criteria.
 
 Production SDK fixes are intentionally outside this package. They should be
 reviewed and committed independently from replay-framework changes.
