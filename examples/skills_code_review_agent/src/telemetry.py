@@ -31,6 +31,7 @@ def build_monitoring_summary(
         "changed_files_count": parsed_diff.changed_files_count,
         "added_lines_count": parsed_diff.added_lines_count,
         "deleted_lines_count": parsed_diff.deleted_lines_count,
+        "parse_warning_count": len(parsed_diff.parse_warnings),
         "sandbox_run_count": len(task.sandbox_runs),
         "filter_decision_count": len(task.filter_decisions),
         "finding_count": _count_by_disposition(findings, FindingDisposition.FINDING),

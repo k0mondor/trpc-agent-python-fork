@@ -67,8 +67,9 @@
 ## 标准 7：高风险脚本必须先经过 Filter 决策
 
 - 所有 skill 脚本执行前统一经过 `filter_policy.py`
+- Filter 同时检查固定 argv 与实际待执行 Skill 脚本内容
 - `deny / needs_human_review` 不直接进入执行
-- 已测试 forbidden path 拦截
+- 已测试 forbidden path、危险命令和网络访问拦截
 
 ## 标准 8：报告必须包含关键信息
 

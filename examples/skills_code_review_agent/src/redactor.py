@@ -31,13 +31,6 @@ _REDACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         r"\1[REDACTED]\3",
     ),
     (
-        re.compile(
-            r"(=\s*['\"])(?=[A-Za-z0-9._~+/=-]{24,}['\"])(?=[^'\"\r\n]*[A-Za-z])"
-            r"(?=[^'\"\r\n]*\d)([A-Za-z0-9._~+/=-]+)(['\"])"
-        ),
-        r"\1[REDACTED]\3",
-    ),
-    (
         re.compile(r"AKIA[0-9A-Z]{16}"),
         "[REDACTED_AWS_KEY]",
     ),
@@ -103,6 +96,9 @@ def redact_parsed_diff(parsed_diff: ParsedDiff) -> ParsedDiff:
     return replace(
         parsed_diff,
         raw_diff=redact_text(parsed_diff.raw_diff),
+        parse_warnings=[
+            redact_text(warning) for warning in parsed_diff.parse_warnings
+        ],
         files=[
             replace(
                 changed_file,

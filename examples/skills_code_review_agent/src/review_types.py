@@ -242,6 +242,7 @@ class ParsedDiff:
 
     raw_diff: str
     files: list[ChangedFile] = field(default_factory=list)
+    parse_warnings: list[str] = field(default_factory=list)
 
     @property
     def changed_files_count(self) -> int:

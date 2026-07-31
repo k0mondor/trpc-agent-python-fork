@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
+import pytest
+
 from examples.skills_code_review_agent.agent.agent import run_review_task
 from examples.skills_code_review_agent.agent import agent as agent_module
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
@@ -195,6 +197,87 @@ def test_sandbox_failure_is_recorded_without_crashing_task(tmp_path: Path) -> No
     assert any(run.status.value == "failed" for run in task.sandbox_runs)
     assert any(finding.category.value == "sandbox" for finding in task.findings)
     assert report.monitoring_summary["sandbox_run_count"] >= 1
+
+
+@pytest.mark.parametrize(
+    "failing_stage",
+    ["load_review_input", "parse_unified_diff", "run_rule_engine"],
+)
+def test_pipeline_failures_are_reported_and_persisted(
+    failing_stage: str,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Every core-stage exception should produce an auditable failed task."""
+
+    monkeypatch.setattr(
+        agent_module,
+        failing_stage,
+        Mock(side_effect=RuntimeError(f"{failing_stage} failed")),
+    )
+    config = ReviewAgentConfig(
+        fixture_path=str(FIXTURES_DIR / "clean.diff"),
+        output_dir=tmp_path / "outputs",
+        db_path=tmp_path / "review.db",
+        runtime="local",
+        dry_run=True,
+        fake_model=True,
+    )
+
+    task, report = run_review_task(config)
+
+    assert task.status.value == "failed"
+    assert failing_stage in (task.error_message or "")
+    assert report.conclusion.value == "error"
+    assert report.monitoring_summary["exception_distribution"] == {
+        "pipeline_error": 1
+    }
+    assert (tmp_path / "outputs" / "review_report.json").is_file()
+    assert (tmp_path / "outputs" / "review_report.md").is_file()
+
+    bundle = ReviewRepository(tmp_path / "review.db").get_review_bundle(
+        task.task_id
+    )
+    assert bundle["task"]["status"] == "failed"
+    assert failing_stage in bundle["task"]["error_message"]
+    assert bundle["report"]["final_verdict"] == "error"
+
+
+def test_local_runtime_does_not_inherit_python_import_paths(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The development fallback must not inherit host PATH or PYTHONPATH."""
+
+    captured_environments: list[dict[str, str]] = []
+    real_subprocess_run = agent_tools.subprocess.run
+
+    def capture_environment(*args, **kwargs):
+        captured_environments.append(dict(kwargs["env"]))
+        return real_subprocess_run(*args, **kwargs)
+
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "untrusted-imports"))
+    monkeypatch.setenv("PATH", str(tmp_path / "untrusted-bin"))
+    monkeypatch.setattr(
+        agent_tools.subprocess,
+        "run",
+        capture_environment,
+    )
+    config = ReviewAgentConfig(
+        fixture_path=str(FIXTURES_DIR / "clean.diff"),
+        output_dir=tmp_path / "outputs",
+        db_path=tmp_path / "review.db",
+        runtime="local",
+        dry_run=True,
+        fake_model=True,
+    )
+
+    task, _report = run_review_task(config)
+
+    assert task.status.value == "completed"
+    assert captured_environments
+    assert all("PYTHONPATH" not in env for env in captured_environments)
+    assert all("PATH" not in env for env in captured_environments)
 
 
 def test_container_runtime_dispatches_through_skill_run(monkeypatch, tmp_path: Path) -> None:

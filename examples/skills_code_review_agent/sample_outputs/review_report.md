@@ -50,6 +50,7 @@ Loaded review input, parsed diff, completed deterministic rule review, and proce
 - `filter_decision_count`: 3
 - `finding_count`: 2
 - `needs_human_review_count`: 0
+- `parse_warning_count`: 0
 - `sandbox_run_count`: 3
 - `severity_distribution`: {'high': 2}
 - `total_duration_ms`: 397

@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             default=_json_default,
         )
     )
-    return 0
+    return 1 if task.status.value == "failed" else 0
 
 
 if __name__ == "__main__":

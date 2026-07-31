@@ -8,7 +8,14 @@ from pathlib import Path
 from .review_types import FilterDecisionRecord, FilterDecisionType, ParsedDiff
 
 _FORBIDDEN_PATH_PARTS = (".git/", ".env", "secrets/", "id_rsa", ".pem")
-_NETWORK_TOKENS = ("http://", "https://", "curl", "wget", "Invoke-WebRequest", "requests.get(")
+_NETWORK_TOKENS = (
+    "http://",
+    "https://",
+    "curl",
+    "wget",
+    "invoke-webrequest",
+    "requests.get(",
+)
 _DANGEROUS_TOKENS = ("rm -rf", "del /f", "format ", "shutdown ", "mkfs")
 _IMPLEMENTED_RUNTIMES = frozenset({"local", "container"})
 
@@ -40,6 +47,7 @@ def evaluate_invocations(
     )
 
     for invocation in invocations:
+        script_text, script_error = _load_script_text(invocation.script_path)
         decision = FilterDecisionRecord(
             decision=FilterDecisionType.ALLOW,
             target=invocation.target,
@@ -65,14 +73,21 @@ def evaluate_invocations(
                 reason_code="forbidden_path",
                 reason="Diff touches a forbidden path and cannot enter sandbox execution.",
             )
-        elif _contains_token(invocation.command, _DANGEROUS_TOKENS):
+        elif script_error is not None:
+            decision = FilterDecisionRecord(
+                decision=FilterDecisionType.DENY,
+                target=invocation.target,
+                reason_code="script_unreadable",
+                reason=f"Skill script could not be inspected: {script_error}",
+            )
+        elif _contains_token(invocation.command, script_text, _DANGEROUS_TOKENS):
             decision = FilterDecisionRecord(
                 decision=FilterDecisionType.DENY,
                 target=invocation.target,
                 reason_code="dangerous_command",
                 reason="Invocation contains a dangerous command pattern.",
             )
-        elif _contains_token(invocation.command, _NETWORK_TOKENS):
+        elif _contains_token(invocation.command, script_text, _NETWORK_TOKENS):
             decision = FilterDecisionRecord(
                 decision=FilterDecisionType.DENY,
                 target=invocation.target,
@@ -101,8 +116,21 @@ def _contains_forbidden_path(parsed_diff: ParsedDiff) -> bool:
     return False
 
 
-def _contains_token(command: list[str], tokens: tuple[str, ...]) -> bool:
-    """Return whether a command contains any blocked token."""
+def _load_script_text(script_path: Path) -> tuple[str, str | None]:
+    """Load the trusted Skill script so Filter decisions cover executable code."""
 
-    command_text = " ".join(command)
-    return any(token in command_text for token in tokens)
+    try:
+        return script_path.read_text(encoding="utf-8", errors="replace"), None
+    except OSError as exc:
+        return "", str(exc)
+
+
+def _contains_token(
+    command: list[str],
+    script_text: str,
+    tokens: tuple[str, ...],
+) -> bool:
+    """Return whether a command or executable Skill script contains a token."""
+
+    executable_text = "\n".join([" ".join(command), script_text]).lower()
+    return any(token in executable_text for token in tokens)

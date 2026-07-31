@@ -21,6 +21,7 @@ tRPC-Agent-Python. It combines deterministic rule detection, a formal
 - Explicit development-local fallback with fixed argv, environment allowlist,
   timeout, and output truncation
 - Secret redaction before reporting and persistence
+- Failed-task reporting and SQLite persistence for pipeline exceptions
 - SQLite storage for tasks, inputs, findings, sandbox runs, filter decisions, and reports
 - `review_report.json` and `review_report.md` output generation
 - Dry-run and fake-model audit labels for deterministic execution
@@ -97,10 +98,16 @@ runtime execution, and input mapping. The diff path is passed through the
 `local` is an explicit development fallback commonly used by dry-run and
 fake-model tests, and is selected only through `--runtime local`.
 It executes only the bundled, pre-resolved scripts with argv-based process
-creation, an environment-variable allowlist, timeout, and output limits; it is
-not presented as sandbox isolation. `cube` and `e2b` are rejected by the Filter
+creation, a minimal environment that excludes host `PATH` and `PYTHONPATH`,
+timeout, and output limits; it is not presented as sandbox isolation. `cube`
+and `e2b` are rejected by the Filter
 as `needs_human_review` until a framework runtime resolver is configured, so
 they never silently fall back to host execution.
+
+Before execution, the Filter inspects both the fixed argv and the executable
+Skill script source for dangerous command and network tokens. It deliberately
+does not reject matching text in the reviewed diff because the diff is staged
+as data and is never interpreted as a command.
 
 ## Outputs
 

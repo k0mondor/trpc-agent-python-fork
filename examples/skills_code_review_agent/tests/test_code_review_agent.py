@@ -13,6 +13,10 @@ from examples.skills_code_review_agent.run_agent import build_parser, parse_args
 from examples.skills_code_review_agent.src import input_loader as input_loader_module
 from examples.skills_code_review_agent.src.deduper import dedupe_and_classify_findings
 from examples.skills_code_review_agent.src.diff_parser import parse_unified_diff
+from examples.skills_code_review_agent.src.filter_policy import (
+    SkillScriptInvocation,
+    evaluate_invocations,
+)
 from examples.skills_code_review_agent.src.input_loader import (
     GIT_DIFF_TIMEOUT_SECONDS,
     load_git_workspace_diff,
@@ -87,6 +91,26 @@ def test_parse_unified_diff_supports_patch_without_diff_git_header() -> None:
     assert parsed.changed_files_count == 1
     assert parsed.files[0].display_path == "config.py"
     assert parsed.files[0].added_line_numbers == [2]
+
+
+def test_parse_unified_diff_records_malformed_hunk_lines() -> None:
+    """Unknown hunk markers should be observable instead of silently dropped."""
+
+    parsed = parse_unified_diff(
+        """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1 +1,2 @@
+ value = 1
+?malformed line
++value = 2
+"""
+    )
+
+    assert parsed.added_lines_count == 1
+    assert parsed.parse_warnings == [
+        "Ignored malformed hunk line: '?malformed line'"
+    ]
 
 
 def test_load_review_input_reads_diff_file(tmp_path: Path) -> None:
@@ -234,16 +258,61 @@ def test_cli_describes_dry_run_and_fake_model_as_audit_labels() -> None:
     assert "Record a fake-model audit label" in help_text
 
 
-def test_redactor_covers_secret_like_and_opaque_assignment_values() -> None:
-    """Fallback assignment rules should hide bare credentials conservatively."""
+def test_redactor_covers_secret_like_assignments_without_hiding_identifiers() -> None:
+    """Fallback rules should hide secret-like values without masking normal IDs."""
 
     secret_like = 'AUTH_HEADER = "super-secret-token-value"'
-    opaque = 'SESSION_VALUE = "a1b2c3d4e5f6g7h8i9j0k1l2"'
+    opaque_identifier = 'SESSION_VALUE = "a1b2c3d4e5f6g7h8i9j0k1l2"'
     ordinary = 'MESSAGE = "this-is-a-normal-message"'
 
     assert "super-secret-token-value" not in redact_text(secret_like)
-    assert "a1b2c3d4e5f6g7h8i9j0k1l2" not in redact_text(opaque)
+    assert redact_text(opaque_identifier) == opaque_identifier
     assert redact_text(ordinary) == ordinary
+
+
+@pytest.mark.parametrize(
+    ("script_body", "expected_reason"),
+    [
+        ('import os\nos.system("rm -rf /tmp/example")\n', "dangerous_command"),
+        (
+            'import requests\nrequests.get("https://example.com")\n',
+            "network_not_allowed",
+        ),
+    ],
+)
+def test_filter_inspects_executable_skill_script_content(
+    script_body: str,
+    expected_reason: str,
+    tmp_path: Path,
+) -> None:
+    """Governance must inspect the script that will execute, not only fixed argv."""
+
+    script_path = tmp_path / "review_script.py"
+    script_path.write_text(script_body, encoding="utf-8")
+    parsed_diff = parse_unified_diff(
+        """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1 +1,2 @@
+ value = 1
++value = 2
+"""
+    )
+    invocation = SkillScriptInvocation(
+        name="review_script",
+        script_path=script_path,
+        command=["python", "scripts/review_script.py"],
+        target="code-review/scripts/review_script.py",
+    )
+
+    evaluated = evaluate_invocations(
+        parsed_diff=parsed_diff,
+        runtime="container",
+        invocations=[invocation],
+    )
+
+    assert evaluated[0][1].reason_code == expected_reason
+    assert evaluated[0][1].decision.value == "deny"
 
 
 def test_run_review_task_surfaces_missing_tests_for_code_only_change(tmp_path: Path) -> None:

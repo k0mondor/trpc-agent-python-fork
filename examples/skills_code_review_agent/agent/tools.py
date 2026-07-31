@@ -36,7 +36,7 @@ OUTPUT_LIMIT_CHARS = 4000
 WORKSPACE_DIFF_PATH = "work/inputs/review.diff"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCAL_ENV_ALLOWLIST = frozenset(
-    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PYTHONPATH", "LANG", "LC_ALL"}
+    {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL"}
 )
 
 

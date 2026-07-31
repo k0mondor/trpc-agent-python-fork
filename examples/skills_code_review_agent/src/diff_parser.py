@@ -109,6 +109,9 @@ def parse_unified_diff(diff_text: str) -> ParsedDiff:
             new_line_no=new_line_no,
         )
         if line is None:
+            parsed.parse_warnings.append(
+                f"Ignored malformed hunk line: {raw_line!r}"
+            )
             continue
 
         current_hunk.lines.append(line)

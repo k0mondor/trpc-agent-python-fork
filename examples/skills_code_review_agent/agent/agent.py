@@ -26,9 +26,12 @@ from ..src.review_types import (
     FindingSource,
     FilterDecisionRecord,
     FilterDecisionType,
+    ParsedDiff,
     ReviewCategory,
     ReviewConclusion,
     ReviewFinding,
+    ReviewInput,
+    ReviewInputKind,
     ReviewReport,
     ReviewSeverity,
     ReviewStatus,
@@ -58,15 +61,41 @@ def create_agent(config: ReviewAgentConfig) -> CodeReviewAgent:
 
 
 def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport]:
-    """Run the review pipeline from normalized input to structured report.
-
-    This is the main orchestration entry point for the example. Later phases will
-    extend it with rule execution, filter decisions, sandbox runs, persistence,
-    and rich report generation.
-    """
+    """Run the review pipeline and convert pipeline errors into audited tasks."""
 
     start_time = perf_counter()
     created_at = datetime.now(timezone.utc).isoformat()
+    task = ReviewTask(
+        task_id=str(uuid4()),
+        status=ReviewStatus.RUNNING,
+        review_input=_build_placeholder_review_input(config),
+    )
+
+    try:
+        return _run_review_task_impl(
+            config,
+            task=task,
+            start_time=start_time,
+            created_at=created_at,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        return _finalize_failed_task(
+            config,
+            task=task,
+            error=exc,
+            start_time=start_time,
+            created_at=created_at,
+        )
+
+
+def _run_review_task_impl(
+    config: ReviewAgentConfig,
+    *,
+    task: ReviewTask,
+    start_time: float,
+    created_at: str,
+) -> tuple[ReviewTask, ReviewReport]:
+    """Execute the successful review path using an initialized task."""
 
     review_input = load_review_input(
         diff_file=config.diff_file,
@@ -75,13 +104,8 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
     )
     parsed_diff = parse_unified_diff(review_input.diff_text)
     diff_sha256 = hashlib.sha256(review_input.diff_text.encode("utf-8")).hexdigest()
-
-    task = ReviewTask(
-        task_id=str(uuid4()),
-        status=ReviewStatus.RUNNING,
-        review_input=review_input,
-        parsed_diff=parsed_diff,
-    )
+    task.review_input = review_input
+    task.parsed_diff = parsed_diff
 
     all_findings = run_rule_engine(parsed_diff)
     with TemporaryDirectory(prefix="trpc-code-review-") as temporary_input_dir:
@@ -172,6 +196,86 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
 
     repository = ReviewRepository(config.db_path)
     repository.save_review(
+        task=task,
+        report=report,
+        report_json=report_json,
+        report_markdown=report_markdown,
+        diff_sha256=diff_sha256,
+        runtime_type=config.runtime,
+        dry_run=config.dry_run,
+        fake_model=config.fake_model,
+        created_at=created_at,
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        total_duration_ms=total_duration_ms,
+    )
+    return task, report
+
+
+def _build_placeholder_review_input(config: ReviewAgentConfig) -> ReviewInput:
+    """Build a non-I/O input record so even loader failures have a task."""
+
+    if config.diff_file is not None:
+        kind = ReviewInputKind.DIFF_FILE
+        source = config.diff_file
+        repo_path = None
+    elif config.repo_path is not None:
+        kind = ReviewInputKind.REPO_PATH
+        source = config.repo_path
+        repo_path = Path(config.repo_path).expanduser()
+    else:
+        kind = ReviewInputKind.FIXTURE
+        source = config.fixture_path or "<missing-fixture>"
+        repo_path = None
+    return ReviewInput(
+        kind=kind,
+        source=str(source),
+        diff_text="",
+        repo_path=repo_path,
+    )
+
+
+def _finalize_failed_task(
+    config: ReviewAgentConfig,
+    *,
+    task: ReviewTask,
+    error: Exception,
+    start_time: float,
+    created_at: str,
+) -> tuple[ReviewTask, ReviewReport]:
+    """Persist and report a pipeline failure without leaking input content."""
+
+    task.status = ReviewStatus.FAILED
+    task.error_message = f"{type(error).__name__}: {error}"
+    if task.parsed_diff is None:
+        task.parsed_diff = ParsedDiff(raw_diff=task.review_input.diff_text)
+
+    diff_sha256 = hashlib.sha256(
+        task.review_input.diff_text.encode("utf-8")
+    ).hexdigest()
+    total_duration_ms = int((perf_counter() - start_time) * 1000)
+    monitoring_summary = build_monitoring_summary(
+        task=task,
+        parsed_diff=task.parsed_diff,
+        total_duration_ms=total_duration_ms,
+    )
+    summary = f"Review pipeline failed: {task.error_message}"
+    task = redact_task(task)
+    report = ReviewReport.from_task(
+        task=task,
+        conclusion=ReviewConclusion.ERROR,
+        summary=summary,
+        monitoring_summary=monitoring_summary,
+    )
+    report = redact_report(report)
+    report_json = build_report_payload(report)
+    report_markdown = render_markdown_report(report)
+    write_report_files(
+        report_json,
+        report_markdown,
+        output_dir=config.output_dir,
+    )
+
+    ReviewRepository(config.db_path).save_review(
         task=task,
         report=report,
         report_json=report_json,
