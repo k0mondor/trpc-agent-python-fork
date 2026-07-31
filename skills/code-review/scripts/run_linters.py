@@ -29,16 +29,21 @@ def main(argv: list[str] | None = None) -> int:
     diff_path = Path(args.diff_file).expanduser().resolve()
     diff_text = diff_path.read_text(encoding="utf-8")
 
-    if "TODO_FAIL_SANDBOX" in diff_text:
+    added_text = "\n".join(
+        line[1:]
+        for line in diff_text.splitlines()
+        if line.startswith("+") and not line.startswith("+++ ")
+    )
+    if "TODO_FAIL_SANDBOX" in added_text:
         print("Simulated linter failure requested by fixture marker.", file=sys.stderr)
         return 2
 
     warnings: list[str] = []
-    if "eval(" in diff_text:
+    if "eval(" in added_text:
         warnings.append("Security-sensitive call detected: eval")
-    if "shell=True" in diff_text:
+    if "shell=True" in added_text:
         warnings.append("Shell execution enabled in subprocess call")
-    if "verify=False" in diff_text:
+    if "verify=False" in added_text:
         warnings.append("TLS verification disabled")
 
     payload = {

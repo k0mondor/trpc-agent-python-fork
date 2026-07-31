@@ -108,7 +108,10 @@ Each run produces:
 - `review_report.json`
 - `review_report.md`
 - `review.db`
-- staged diff inputs under `skill_inputs/`
+
+Raw diff inputs are staged only in a short-lived system temporary directory
+while Skill scripts run. The directory is deleted before the task is returned,
+so unredacted diff content is not retained with report artifacts.
 
 The JSON report includes:
 

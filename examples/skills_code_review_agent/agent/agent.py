@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 from uuid import uuid4
 
@@ -72,6 +74,7 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
         fixture_path=config.fixture_path,
     )
     parsed_diff = parse_unified_diff(review_input.diff_text)
+    diff_sha256 = hashlib.sha256(review_input.diff_text.encode("utf-8")).hexdigest()
 
     task = ReviewTask(
         task_id=str(uuid4()),
@@ -81,30 +84,34 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
     )
 
     all_findings = run_rule_engine(parsed_diff)
-    diff_file_path = _materialize_diff_input(task=task, output_dir=config.output_dir)
-    script_plan = build_skill_script_plan(
-        diff_file=diff_file_path,
-        project_root=Path(__file__).resolve().parents[3],
-    )
-    evaluated_invocations = evaluate_invocations(
-        parsed_diff=parsed_diff,
-        runtime=config.runtime,
-        invocations=script_plan,
-    )
-    approved_invocations = [
-        invocation
-        for invocation, decision in evaluated_invocations
-        if decision.decision == FilterDecisionType.ALLOW
-    ]
-    executed_runs = {
-        run.name: run
-        for run in execute_skill_scripts(
-            approved_invocations,
-            runtime=config.runtime,
+    with TemporaryDirectory(prefix="trpc-code-review-") as temporary_input_dir:
+        diff_file_path = _materialize_diff_input(
+            task=task,
+            input_dir=Path(temporary_input_dir),
+        )
+        script_plan = build_skill_script_plan(
             diff_file=diff_file_path,
             project_root=Path(__file__).resolve().parents[3],
         )
-    }
+        evaluated_invocations = evaluate_invocations(
+            parsed_diff=parsed_diff,
+            runtime=config.runtime,
+            invocations=script_plan,
+        )
+        approved_invocations = [
+            invocation
+            for invocation, decision in evaluated_invocations
+            if decision.decision == FilterDecisionType.ALLOW
+        ]
+        executed_runs = {
+            run.name: run
+            for run in execute_skill_scripts(
+                approved_invocations,
+                runtime=config.runtime,
+                diff_file=diff_file_path,
+                project_root=Path(__file__).resolve().parents[3],
+            )
+        }
 
     for invocation, decision in evaluated_invocations:
         task.add_filter_decision(decision)
@@ -169,6 +176,7 @@ def run_review_task(config: ReviewAgentConfig) -> tuple[ReviewTask, ReviewReport
         report=report,
         report_json=report_json,
         report_markdown=report_markdown,
+        diff_sha256=diff_sha256,
         runtime_type=config.runtime,
         dry_run=config.dry_run,
         fake_model=config.fake_model,
@@ -198,12 +206,12 @@ def _count_by_disposition(findings: list, disposition: FindingDisposition) -> in
     return sum(1 for finding in findings if finding.disposition == disposition)
 
 
-def _materialize_diff_input(*, task: ReviewTask, output_dir: Path) -> Path:
-    """Write the normalized diff text to a file for skill-script execution."""
+def _materialize_diff_input(*, task: ReviewTask, input_dir: Path) -> Path:
+    """Write a short-lived raw diff for skill-script execution."""
 
-    inputs_dir = output_dir.expanduser().resolve() / "skill_inputs"
+    inputs_dir = input_dir.expanduser().resolve()
     inputs_dir.mkdir(parents=True, exist_ok=True)
-    diff_file = inputs_dir / f"{task.task_id}.diff"
+    diff_file = inputs_dir / "review.diff"
     diff_file.write_text(task.review_input.diff_text, encoding="utf-8")
     return diff_file
 

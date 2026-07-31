@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -24,6 +23,7 @@ class ReviewRepository:
         report: ReviewReport,
         report_json: dict[str, object],
         report_markdown: str,
+        diff_sha256: str,
         runtime_type: str,
         dry_run: bool,
         fake_model: bool,
@@ -65,7 +65,7 @@ class ReviewRepository:
                 """,
                 (
                     task.task_id,
-                    hashlib.sha256(task.review_input.diff_text.encode("utf-8")).hexdigest(),
+                    diff_sha256,
                     task.parsed_diff.changed_files_count if task.parsed_diff else 0,
                     _count_hunks(task),
                     _count_candidate_lines(task),

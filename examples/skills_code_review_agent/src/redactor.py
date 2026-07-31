@@ -6,6 +6,8 @@ import re
 from dataclasses import replace
 
 from .review_types import (
+    FilterDecisionRecord,
+    ParsedDiff,
     ReviewFinding,
     ReviewReport,
     ReviewTask,
@@ -69,13 +71,71 @@ def redact_sandbox_run(record: SandboxRunRecord) -> SandboxRunRecord:
     )
 
 
+def redact_filter_decision(
+    record: FilterDecisionRecord,
+) -> FilterDecisionRecord:
+    """Return a copy of a filter decision with redacted display text."""
+
+    return replace(
+        record,
+        target=redact_text(record.target),
+        reason=redact_text(record.reason),
+    )
+
+
+def redact_parsed_diff(parsed_diff: ParsedDiff) -> ParsedDiff:
+    """Return a deep-redacted copy of parsed diff content."""
+
+    return replace(
+        parsed_diff,
+        raw_diff=redact_text(parsed_diff.raw_diff),
+        files=[
+            replace(
+                changed_file,
+                old_path=redact_text(changed_file.old_path),
+                new_path=redact_text(changed_file.new_path),
+                hunks=[
+                    replace(
+                        hunk,
+                        header=redact_text(hunk.header),
+                        lines=[
+                            replace(
+                                line,
+                                text=redact_text(line.text),
+                                raw_line=redact_text(line.raw_line),
+                            )
+                            for line in hunk.lines
+                        ],
+                    )
+                    for hunk in changed_file.hunks
+                ],
+            )
+            for changed_file in parsed_diff.files
+        ],
+    )
+
+
 def redact_task(task: ReviewTask) -> ReviewTask:
     """Return a copy of the task with redacted output-bearing fields."""
 
     return replace(
         task,
+        review_input=replace(
+            task.review_input,
+            source=redact_text(task.review_input.source),
+            diff_text=redact_text(task.review_input.diff_text),
+        ),
+        parsed_diff=(
+            redact_parsed_diff(task.parsed_diff)
+            if task.parsed_diff is not None
+            else None
+        ),
         findings=[redact_finding(finding) for finding in task.findings],
         sandbox_runs=[redact_sandbox_run(run) for run in task.sandbox_runs],
+        filter_decisions=[
+            redact_filter_decision(decision)
+            for decision in task.filter_decisions
+        ],
         error_message=redact_text(task.error_message) if task.error_message else None,
     )
 
@@ -91,5 +151,9 @@ def redact_report(report: ReviewReport) -> ReviewReport:
             redact_finding(finding) for finding in report.needs_human_review
         ],
         sandbox_runs=[redact_sandbox_run(run) for run in report.sandbox_runs],
+        filter_decisions=[
+            redact_filter_decision(decision)
+            for decision in report.filter_decisions
+        ],
         summary=redact_text(report.summary),
     )

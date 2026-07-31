@@ -25,7 +25,8 @@ Output:
 
 Purpose:
 
-- runs deterministic lint-style checks over the diff content
+- runs deterministic lint-style checks over added diff lines only
+- ignores deleted and unchanged context lines to keep findings precisely locatable
 
 CLI:
 
@@ -43,7 +44,7 @@ Output:
 
 Failure behavior:
 
-- exits non-zero when the diff contains the `TODO_FAIL_SANDBOX` marker
+- exits non-zero when an added line contains the `TODO_FAIL_SANDBOX` marker
 - intended for sandbox failure testing and pipeline resilience checks
 
 ## `scripts/run_tests.py`

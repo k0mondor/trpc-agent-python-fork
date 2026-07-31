@@ -34,6 +34,7 @@ SKILL_NAME = "code-review"
 SCRIPT_TIMEOUT_SECONDS = 20
 OUTPUT_LIMIT_CHARS = 4000
 WORKSPACE_DIFF_PATH = "work/inputs/review.diff"
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCAL_ENV_ALLOWLIST = frozenset(
     {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PYTHONPATH", "LANG", "LC_ALL"}
 )
@@ -556,6 +557,9 @@ def _sanitize_display_value(value: str) -> str:
     if value == sys.executable:
         return "python"
 
+    if "/" not in value and "\\" not in value:
+        return value
+
     candidate = Path(value)
     if candidate.is_absolute():
         try:
@@ -610,7 +614,7 @@ def _resolve_project_root(project_root: Path | None = None) -> Path:
 
     if project_root is not None:
         return project_root.expanduser().resolve()
-    return Path(__file__).resolve().parents[3]
+    return _PROJECT_ROOT
 
 
 def _create_workspace_runtime(

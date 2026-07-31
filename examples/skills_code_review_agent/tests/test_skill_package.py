@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from examples.skills_code_review_agent.agent.tools import build_skill_run_payload
 from examples.skills_code_review_agent.agent.tools import build_skill_script_plan
@@ -14,6 +19,7 @@ SKILL_DIR = (
     / "skills"
     / "code-review"
 )
+EXAMPLE_SKILL_DIR = Path(__file__).resolve().parents[1] / "skills" / "code-review"
 
 
 def test_skill_markdown_contains_expected_workflow_sections() -> None:
@@ -81,6 +87,45 @@ def test_build_skill_script_plan_uses_repository_root_skill_scripts(tmp_path: Pa
     assert all(invocation.command[0] == "python" for invocation in plan)
     assert all(invocation.command[1].startswith("scripts/") for invocation in plan)
     assert all(invocation.command[-1] == "work/inputs/review.diff" for invocation in plan)
+
+
+@pytest.mark.parametrize("skill_dir", [SKILL_DIR, EXAMPLE_SKILL_DIR])
+def test_linter_scans_only_added_diff_lines(
+    skill_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """Deleted and context code must not produce new-code warnings."""
+
+    diff_file = tmp_path / "deleted-risk.diff"
+    diff_file.write_text(
+        """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,3 +1,3 @@
+ verify = False  # verify=False is unchanged context
+-result = eval(payload)
+-subprocess.run(command, shell=True)
++result = safe_parse(payload)
++subprocess.run(command, check=True)
+""",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(skill_dir / "scripts" / "run_linters.py"),
+            "--diff-file",
+            str(diff_file),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0
+    assert json.loads(completed.stdout)["warnings"] == []
 
 
 def test_skill_repository_indexes_root_code_review_skill() -> None:

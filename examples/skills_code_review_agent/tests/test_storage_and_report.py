@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
 from examples.skills_code_review_agent.agent.agent import run_review_task
+from examples.skills_code_review_agent.agent import agent as agent_module
 from examples.skills_code_review_agent.agent.config import ReviewAgentConfig
 from examples.skills_code_review_agent.agent import tools as agent_tools
 from examples.skills_code_review_agent.src.storage.repository import ReviewRepository
@@ -77,8 +80,24 @@ def test_run_review_task_persists_human_review_state(tmp_path: Path) -> None:
     assert bundle["task"]["status"] == "completed"
 
 
-def test_secret_values_are_redacted_in_reports_and_database(tmp_path: Path) -> None:
+def test_secret_values_are_redacted_in_reports_and_database(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     """Secrets must be redacted before report generation and persistence."""
+
+    temporary_input_dirs: list[Path] = []
+
+    def tracked_temporary_directory(**kwargs):
+        context = tempfile.TemporaryDirectory(dir=tmp_path, **kwargs)
+        temporary_input_dirs.append(Path(context.name))
+        return context
+
+    monkeypatch.setattr(
+        agent_module,
+        "TemporaryDirectory",
+        tracked_temporary_directory,
+    )
 
     config = ReviewAgentConfig(
         fixture_path=str(FIXTURES_DIR / "secret_redaction.diff"),
@@ -103,10 +122,28 @@ def test_secret_values_are_redacted_in_reports_and_database(tmp_path: Path) -> N
         "super-secret-token-value",
     ]
     joined_db_text = json.dumps(bundle, ensure_ascii=False)
+    expected_diff_sha256 = hashlib.sha256(
+        (FIXTURES_DIR / "secret_redaction.diff")
+        .read_text(encoding="utf-8")
+        .encode("utf-8")
+    ).hexdigest()
     for fragment in forbidden_fragments:
+        assert fragment not in task.review_input.diff_text
+        assert task.parsed_diff is not None
+        assert fragment not in task.parsed_diff.raw_diff
+        assert all(
+            fragment not in line.raw_line
+            for changed_file in task.parsed_diff.files
+            for hunk in changed_file.hunks
+            for line in hunk.lines
+        )
         assert fragment not in json.dumps(json_payload, ensure_ascii=False)
         assert fragment not in markdown
         assert fragment not in joined_db_text
+    assert temporary_input_dirs
+    assert all(not path.exists() for path in temporary_input_dirs)
+    assert not (tmp_path / "outputs" / "skill_inputs").exists()
+    assert bundle["input"]["diff_sha256"] == expected_diff_sha256
 
 
 def test_filter_denies_forbidden_paths_and_skips_sandbox(tmp_path: Path) -> None:
